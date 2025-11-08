@@ -1,0 +1,42 @@
+digraph VotingOverview {
+  rankdir=LR;
+  fontname="Inter"; fontsize=12;
+  nodesep=0.6; ranksep=1.0;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", color="#C9CED6", fontname="Inter", fontsize=12];
+
+  Contract [label="contract Voting\n(Simple Voting MVP)", fillcolor="#F3F4F6", shape=box, style="rounded,bold,filled"];
+
+  State [label="State\n──────────────\nadmin, title, startTs, endTs\n_candidates[], _tally[]\nregistered[address], hasVoted[address]\n_receiptUsed[bytes32]", fillcolor="#E8F0FE"];
+  Events [label="Events\n──────────────\nElectionConfigured\nVoterRegistered\nVoteCast", fillcolor="#EAF4EC"];
+  Admin [label="Admin Actions\n──────────────\nregisterVoters()\nupdateWindow()\ncloseEarly()", fillcolor="#FDE2E4"];
+  Voting [label="Voting\n──────────────\nvote(optionIndex, receipt)", fillcolor="#FCEFE3"];
+  Views [label="View Functions\n──────────────\ncandidates()\ntally()\nelectionInfo()\nstatus()\nhasReceipt()", fillcolor="#E8EAF6"];
+
+  /* Simple relationships */
+  Contract -> State [label="stores", color="#111827"];
+  Contract -> Events [label="emits", color="#2563EB"];
+  Contract -> Admin [label="controls", color="#F59E0B"];
+  Contract -> Voting [label="handles votes", color="#111827"];
+  Contract -> Views [label="exposes", color="#6B7280"];
+
+  Admin -> State [label="modifies", color="#111827"];
+  Voting -> State [label="reads/writes", color="#111827"];
+  Views -> State [label="reads", style=dashed, color="#6B7280"];
+  Admin -> Events [label="emit config/registration", style=dotted, color="#2563EB"];
+  Voting -> Events [label="emit vote", style=dotted, color="#2563EB"];
+
+  /* Legend */
+  Legend [shape=plaintext, label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="6">
+      <tr><td bgcolor="#F3F4F6"><b>Legend</b></td></tr>
+      <tr><td align="left"><font color="#111827">solid</font> = state interaction</td></tr>
+      <tr><td align="left"><font color="#6B7280">grey dashed</font> = read-only</td></tr>
+      <tr><td align="left"><font color="#2563EB">blue dotted</font> = emit event</td></tr>
+      <tr><td align="left"><font color="#F59E0B">orange</font> = admin control</td></tr>
+    </table>
+  >];
+
+  {rank=same; Admin; Voting; Views;}
+  {rank=sink; Legend;}
+}

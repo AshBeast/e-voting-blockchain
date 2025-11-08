@@ -1,0 +1,128 @@
+/* ---------- Global Reset / Fix Overflow ---------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- Page Layout ---------- */
+.page {
+  max-width: 860px;
+  margin: 30px auto;
+  padding: 0 16px; /* helps on smaller screens */
+  text-align: left;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* ---------- Typography Helpers ---------- */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere; /* long contract addresses won't overflow */
+}
+
+.pre {
+  white-space: pre-wrap;
+}
+
+/* ---------- Card / Section ---------- */
+.card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  overflow: hidden; /* avoid edge bleed */
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.kv {
+  margin: 4px 0;
+}
+
+/* ---------- Form Inputs ---------- */
+.field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+  min-width: 0; /* ✅ important: prevents overflow inside grid/flex */
+}
+
+.input,
+textarea.input,
+select.input,
+input[type="text"].input,
+input[type="password"].input,
+input[type="datetime-local"].input {
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
+  box-sizing: border-box; /* ✅ essential fix */
+}
+
+/* Two-column inputs (Start / End) */
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Buttons / Actions ---------- */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn + .btn {
+  margin-left: 0; /* rely on gap instead */
+}
+
+.btn[disabled],
+.btn.disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ---------- Table Styling ---------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  font-weight: 600;
+}
+
+.table td {
+  padding: 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+/* ---------- Small Utility Spacing ---------- */
+.mb8 { margin-bottom: 8px; }
+.mt8 { margin-top: 8px; }
+.mt12 { margin-top: 12px; }
