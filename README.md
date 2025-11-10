@@ -49,15 +49,24 @@ This MVP demonstrates a minimal, auditable vote flow:
 ## Project Layout
 
 ```
-evote-mvp/
-  ├─ contracts/         # Voting.sol
-  ├─ scripts/           # deploy_and_register.js etc.
-  ├─ ignition/          # (if using Hardhat Ignition)
-  ├─ evote-ui/          # Vite React frontend (Admin + Voter)
-  ├─ hardhat.config.js
-  ├─ package.json
-  ├─ pnpm-lock.yaml
-  └─ README.md
+E-VOTING-BLOCKCHAIN/
+├─ e-voting/                 # Hardhat project (contracts + unit tests)
+│  ├─ contracts/
+│  ├─ scripts/
+│  ├─ test/
+├─ evote-ui/                 # Vite React frontend (Admin + Voter)
+│  ├─ public/
+│  ├─ src/
+│  ├─ eslint.config.js
+│  ├─ index.html
+├─ UITesting/                # Playwright E2E (drives the real UI)
+│  ├─ fixtures/
+│  ├─ playwright-report/
+│  ├─ test-results/
+│  ├─ tests/
+├─ screenshots/
+└─ README.md
+
 ```
 
 ---
@@ -342,5 +351,106 @@ npx hardhat test --grep "Deployment|Access Control|Registration"
 npx hardhat test --grep "closeEarly"
 
 ```
+
+# Playwright (End-to-End UI Tests)
+
+This suite drives the real web UI against a local Hardhat node to prove the full flow end-to-end.
+What the tests cover
+
+1. Deploy & Register (Admin panel)
+
+- Toggles local signer → fills title/candidates → sets start/end → pastes allowlist → Deploy & Register.
+
+- Captures and validates the contract address.
+
+2. Open Election (Voter view)
+
+- Opens / → pastes address → Open Election → waits until Status: OPEN (helper waitForStatus() taps Refresh while the page auto-updates).
+
+3. Cast One Vote (receipt + tally)
+
+- Navigates to Cast Ballot → fills voter private key → picks candidate → Cast Vote.
+
+- Extracts receipt hash, verifies inclusion on Check Receipt, then confirms tally shows the vote.
+
+4. Double-Vote Negative
+
+- Attempts a second vote from the same wallet → expects “already voted”.
+
+5. Close (CLOSED)
+
+- Admin attaches the existing contract → End Election Now.
+
+- Election page shows Status: CLOSED; tally remains visible/final.
+
+### Helper functions in the test:
+
+`toLocalInputString()` – formats <input type="datetime-local"> values.
+
+`waitForStatus(page, "OPEN" | "CLOSED")` – polls the Status row and taps Refresh until it matches.
+
+## Pre-run checklist
+
+- Hardhat node is running (npx hardhat node, keep it open).
+
+- UI dev server is running (Vite, usually at http://localhost:5173).
+
+- UI Admin panel supports “Use Local Hardhat signer”.
+
+- Your Playwright config’s baseURL points to the UI dev server (e.g., http://localhost:5173).
+
+## Install & run
+
+```bash
+
+# from repo root (or ui folder if Playwright is scoped there)
+pnpm exec playwright install
+
+# run just this E2E file
+TEST_SEED=1 pnpm exec playwright test tests/election.e2e.spec.js
+
+# show HTML report after a run
+pnpm exec playwright show-report
+```
+
+### Debugging tips
+
+```bash
+# Open Playwright Inspector (headed, pausing at each action)
+PWDEBUG=1 TEST_SEED=1 pnpm exec playwright test tests/election.e2e.spec.js
+```
+
+Notes
+
+If Status doesn’t flip as expected during demos, keep Refresh visible: the helper waitForStatus() will keep tapping it while the page’s own auto-update detects the start/end time.
+
+Ensure date/time fields are valid local times; the helper toLocalInputString() formats them correctly.
+
+If you change any button/label text in the UI, update the test locators to match (they use accessible names like “Open Election”, “Cast Vote”, “End Election Now”).
+
+# Milestone 1 — Completed Deliverables
+
+- Date: November 2025
+
+- Goal: Establish a working foundation of the blockchain voting system with verified rules, a functional UI, and automated tests.
+
+### What was completed
+
+- Smart Contract (Voting.sol) — fully implemented and audited through 15 Hardhat unit tests covering access control, registration, voting, receipt validation, and tallying.
+
+- Unit Testing (Hardhat + Mocha/Chai) — all tests passing; average vote() execution ≈ 90 k gas; confirms one-vote-per-voter and correct state transitions.
+
+- Frontend UI (Vite + React) — Admin Panel and Voter View pages built; includes live tally display, receipt verification, and automatic status updates.
+
+- End-to-End Testing (Playwright) — MVP E2E suite verifying the full election lifecycle: deploy → register → vote → verify → close.
+
+- Bug fixes + UX polish — fixed refresh/status timing issue; UI now updates automatically when election start/end times are reached.
+
+- Documentation updates — expanded README with test instructions, run commands, and project layout.
+
+### Summary
+
+Milestone 1 demonstrates a complete election cycle operating on a local Hardhat network.
+All core rules are enforced by smart contracts, validated by automated tests, and observable through the live React interface and Playwright UI automation. This provides a solid base for Milestone 2.
 
 ## License
