@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 //ElectionPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";

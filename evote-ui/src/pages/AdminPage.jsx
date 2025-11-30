@@ -1,3 +1,4 @@
+// AdminPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { ethers, NonceManager } from "ethers";
 import votingArtifact from "../Voting.json";

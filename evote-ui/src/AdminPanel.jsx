@@ -1,3 +1,4 @@
+//AdminPanel.jsx
 import { useState } from "react";
 import { ethers, NonceManager } from "ethers";
 import votingArtifact from "./Voting.json";
