@@ -45,7 +45,7 @@ test.describe
 
     const localToggle = page.getByLabel("Use Local Hardhat signer");
     if (!(await localToggle.isChecked())) await localToggle.check();
-
+//
     await page
       .getByLabel("Admin Private Key (dev only)")
       .fill(admin.privateKey);
@@ -113,6 +113,7 @@ test.describe
 
     await page.getByRole("link", { name: "Cast Ballot" }).click();
 
+    await page.getByRole('checkbox', { name: 'Use Local Hardhat signer (' }).check();
     await page.getByLabel("Private Key").fill(voter.privateKey);
     await page.getByLabel("Candidate").selectOption({ value: "0" });
 
@@ -165,6 +166,7 @@ test.describe
     await page.goto(`/election/${contractAddress}`);
     await page.getByRole("link", { name: "Cast Ballot" }).click();
 
+    await page.getByRole('checkbox', { name: 'Use Local Hardhat signer (' }).check();
     await page.getByLabel("Private Key").fill(voter.privateKey);
     await page.getByLabel("Candidate").selectOption({ value: "1" });
     await page.getByRole("button", { name: "Cast Vote" }).click();

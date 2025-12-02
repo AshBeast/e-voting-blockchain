@@ -6,7 +6,7 @@ import { ethers } from "ethers";
 import "../App.css";
 
 
-const RPC = import.meta.env.VITE_LOCAL_RPC || import.meta.env.VITE_RPC_URL;
+const RPC = import.meta.env.VITE_RPC_URL || import.meta.env.VITE_LOCAL_RPC || "http://127.0.0.1:8545";
 
 const ABI = [
   "function candidates() view returns (string[] memory)",

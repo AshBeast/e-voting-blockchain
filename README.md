@@ -27,8 +27,6 @@ Version: 1.0.0
 - [Sepolia / MetaMask (Optional)](#sepolia--metamask-optional)
 - [License](#license)
 
----
-
 ## Overview
 
 This MVP demonstrates a minimal, auditable vote flow:
@@ -38,6 +36,26 @@ This MVP demonstrates a minimal, auditable vote flow:
 - Voters cast one vote each during the open window.
 - A **receipt hash** is returned for each vote; voters can verify inclusion without exposing identity or choice.
 - **Live tally** is public and updates on each valid vote; voting blocks when the window closes.
+
+## Hosted Demo (Sepolia)
+
+A hosted build of the UI is available on Sepolia:
+
+- Voter View: https://evote.donkloud.ca
+- Admin Panel: https://evote.donkloud.ca/admin
+
+Requirements:
+
+- MetaMask installed.
+- Wallet configured for the **Sepolia** test network.
+- Some Sepolia test ETH in the admin and voter accounts.
+
+Usage (high level):
+
+1. **Admin** goes to `https://evote.donkloud.ca/admin`, leaves “Use Local Hardhat signer” **unchecked** so the app uses MetaMask, configures an election, and clicks **Deploy & Register** on Sepolia.
+2. **Voters** go to `https://evote.donkloud.ca`, paste the contract address, attach to the election, and cast ballots using MetaMask.
+3. Everyone can see the **live tally** and use the **Check Receipt** page to verify inclusion of a receipt hash on-chain.
+
 
 ## Requirements
 
@@ -110,6 +128,18 @@ Termina B
 ```bash
 pnpm dev
 ```
+
+
+For local Hardhat dev, `pnpm dev` uses `.env.local` by default.
+
+To run the UI wired to Sepolia (using `.env.sepolia`), use:
+
+```bash
+pnpm dev --mode sepolia
+```
+
+Vite will then load .env.sepolia (and .env.sepolia.local if present) instead of the default env file set.
+
 
 Open the URL printed by Vite (usually `http://localhost:5173`).
 

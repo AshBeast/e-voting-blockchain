@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ethers } from "ethers";
 
-const RPC = import.meta.env.VITE_LOCAL_RPC || import.meta.env.VITE_RPC_URL;
+const RPC = import.meta.env.VITE_RPC_URL || import.meta.env.VITE_LOCAL_RPC || "http://127.0.0.1:8545";
 
 const ABI = [
   "function hasReceipt(bytes32 receipt) view returns (bool)",
