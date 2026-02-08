@@ -77,6 +77,7 @@ E-VOTING-BLOCKCHAIN/
 │  ├─ test/
 ├─ evote-ui/                 # Vite React frontend (Admin + Voter)
 │  ├─ public/
+│  ├─ relayer/               # Relayer is here
 │  ├─ src/
 │  ├─ eslint.config.js
 │  ├─ index.html
@@ -144,6 +145,28 @@ pnpm dev --mode sepolia
 Vite will then load `.env.sepolia` (and `.env.sepolia.local` if present) instead of the default env file set.
 
 Open the URL printed by Vite (usually `http://localhost:5173`).
+
+### 3) Start the relayer (Gasless voting, Sepolia)
+Open a new **Terminal C**
+
+1. Create a relayer env file at:
+
+`evote-ui/relayer/.env.sepolia`
+example:
+```bash
+RELAYER_PORT=8787
+RELAYER_RPC_URL=https://sepolia.infura.io/v3/<YOUR_INFURA_KEY>
+RELAYER_PRIVATE_KEY=0x<RELAYER_FUNDED_PRIVATE_KEY>
+```
+2. Start the relayer:
+```bash
+cd evote-mvp/evote-ui/relayer
+node -r dotenv/config server.cjs dotenv_config_path=.env.sepolia
+```
+
+You should see `{ ok: true, relayer: "...", chainId: 11155111 }`.
+
+
 
 ### 4) Admin Panel — Local mode
 
@@ -584,3 +607,19 @@ Milestone 2 moves the system from a local-only prototype to a publicly accessibl
 The same `Voting.sol` contract and React client now run on Sepolia, with MetaMask handling real transaction signing and a hosted frontend at `evote.donkloud.ca`. This demonstrates that the architecture works in a realistic, decentralized environment and sets the stage for future milestones on scaling, kiosk mode, and UAT.
 
 ---
+
+## Milestone 3 — Completed Deliverables
+
+- Date: **January–February 2026**
+- Goal: Harden the system and add gasless voting using an EIP-2771 forwarder + relayer, while keeping the local demo flow fully testable end-to-end.
+
+### What was completed
+
+- **Gasless Voting (EIP-2771)** — implemented OpenZeppelin `ERC2771Forwarder` (`Forwarder.sol`) plus a Node/Express relayer that accepts EIP-712 typed-data signatures, verifies the request (`verify()`), and submits `execute()` while paying gas.
+- **EIP-2771-Aware Voting Contract** — updated `Voting.sol` to use `_msgSender()` and accept a `trustedForwarder` in the constructor so votes are attributed to the voter (not the relayer).
+- **End-to-End Local Flow** — local Hardhat now supports both vote paths:
+  - **Direct vote** (local private key mode), and
+  - **Gasless vote** (MetaMask signs → relayer pays gas).
+- **Playwright E2E Coverage** — core election lifecycle tests pass end-to-end (deploy → register → vote → verify receipt → close).
+- **Admin Ops Exercised** — validated admin operations (`updateWindow`, `closeEarly`) through the UI and tests so elections can be adjusted or ended early.
+- **Audit Layer (Explorer Links)** — added UI affordances to support auditability (links to transactions/events on explorers) so observers can verify on-chain activity without manual log inspection.

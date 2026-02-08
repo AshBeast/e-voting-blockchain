@@ -1,24 +1,38 @@
-// src/main.jsx
+// evote-ui/src/main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-import App from "./App";                               // Home (address gate)
-import AdminPage from "./pages/AdminPage.jsx";         // your existing admin page
-import ElectionPage from "./pages/ElectionPage.jsx";   // new
-import VotePage from "./pages/VotePage.jsx";           // placeholder
-import ReceiptPage from "./pages/ReceiptPage.jsx";     // placeholder
+import App from "./App.jsx";
+
+// Pages
+import AdminPage from "./pages/AdminPage.jsx";
+import ElectionPage from "./pages/ElectionPage.jsx";
+import VotePage from "./pages/VotePage.jsx";
+import ReceiptPage from "./pages/ReceiptPage.jsx";
+
+// Route wrappers (provider/chainId wiring)
+import WatchdogRoute from "./routes/WatchdogRoute.jsx";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <BrowserRouter>
-    <Routes>
-      <Route path="/" element={<App />} />
-      <Route path="/admin" element={<AdminPage />} />
+  <React.StrictMode>
+    <BrowserRouter>
+      <Routes>
+        {/* Home */}
+        <Route path="/" element={<App />} />
 
-      {/* Election routes */}
-      <Route path="/election/:addr" element={<ElectionPage />} />
-      <Route path="/election/:addr/vote" element={<VotePage />} />
-      <Route path="/election/:addr/receipt" element={<ReceiptPage />} />
-    </Routes>
-  </BrowserRouter>
+        {/* Admin */}
+        <Route path="/admin" element={<AdminPage />} />
+
+        {/* Watchdog audit */}
+        <Route path="/watchdog" element={<WatchdogRoute />} />
+        <Route path="/watchdog/:addr" element={<WatchdogRoute />} />
+
+        {/* Election routes */}
+        <Route path="/election/:addr" element={<ElectionPage />} />
+        <Route path="/election/:addr/vote" element={<VotePage />} />
+        <Route path="/election/:addr/receipt" element={<ReceiptPage />} />
+      </Routes>
+    </BrowserRouter>
+  </React.StrictMode>
 );
