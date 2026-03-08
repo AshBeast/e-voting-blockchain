@@ -2,11 +2,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ethers } from "ethers";
+import { Identity } from "@semaphore-protocol/identity";
+import { Group } from "@semaphore-protocol/group";
+import { generateProof } from "@semaphore-protocol/proof";
 
 import votingArtifact from "../Voting.json";
-import forwarderArtifact from "../Forwarder.json";
 
-// Prefer remote RPC (Sepolia) if set, otherwise local Hardhat, otherwise default localhost
 const RPC =
   import.meta.env.VITE_RPC_URL ||
   import.meta.env.VITE_LOCAL_RPC ||
@@ -14,18 +15,9 @@ const RPC =
 
 const RELAYER_URL = import.meta.env.VITE_RELAYER_URL || "http://localhost:8787";
 
-// EIP-712 types expected by OpenZeppelin ERC2771Forwarder
-const FORWARD_TYPES = {
-  ForwardRequest: [
-    { name: "from", type: "address" },
-    { name: "to", type: "address" },
-    { name: "value", type: "uint256" },
-    { name: "gas", type: "uint256" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint48" },
-    { name: "data", type: "bytes" },
-  ],
-};
+function normErr(e) {
+  return e?.reason || e?.shortMessage || e?.message || String(e);
+}
 
 export default function VotePage() {
   const { addr } = useParams();
@@ -38,7 +30,6 @@ export default function VotePage() {
   const [candidates, setCandidates] = useState([]);
   const [optionIndex, setOptionIndex] = useState(0);
 
-  // auth mode
   const [useLocal, setUseLocal] = useState(
     () => localStorage.getItem("vote.useLocal") === "1"
   );
@@ -54,7 +45,6 @@ export default function VotePage() {
     if (pk?.startsWith("0x")) localStorage.setItem("vote.pk", pk);
   }, [pk]);
 
-  // basic guard + provider
   useEffect(() => {
     if (!ethers.isAddress(addr)) {
       navigate("/", { replace: true });
@@ -63,7 +53,6 @@ export default function VotePage() {
     setProvider(new ethers.JsonRpcProvider(RPC));
   }, [addr, navigate]);
 
-  // contract (read)
   useEffect(() => {
     if (!provider || !ethers.isAddress(addr)) return;
     setContract(new ethers.Contract(addr, votingArtifact.abi, provider));
@@ -77,7 +66,6 @@ export default function VotePage() {
       setStatus(st);
       setCandidates(cs);
     } catch (e) {
-      // keep UI alive even if RPC hiccups
       console.error(e);
     }
   }
@@ -108,150 +96,127 @@ export default function VotePage() {
     return { bp, signer };
   }
 
-  function makeReceipt(voterAddr, idx) {
-    // receipt = keccak256(abi.encodePacked(voter, optionIndex, nonce))
-    const nonce16 = ethers.randomBytes(16);
-    return ethers.solidityPackedKeccak256(
-      ["address", "uint256", "bytes16"],
-      [voterAddr, BigInt(idx), nonce16]
-    );
-  }
-
-  async function castVoteLocal() {
-    if (!contract) throw new Error("Contract not ready.");
-    const wallet = await getLocalWallet();
-    const write = contract.connect(wallet);
-
-    const voterAddr = await wallet.getAddress();
-    const receipt = makeReceipt(voterAddr, optionIndex);
-
-    setVoteMsg("Submitting transaction (local)…");
-    const tx = await write.vote(Number(optionIndex), receipt);
-    await tx.wait();
-
-    setVoteMsg(`✅ Vote confirmed (local).\nReceipt:\n${receipt}`);
-    await load();
-  }
-
-  async function castVoteGasless() {
-    // MetaMask signer + browser provider for chainId
-    const { bp, signer } = await getMetaMaskSigner();
-    const from = await signer.getAddress();
-
-    // Read Voting using MetaMask provider (prevents chain mismatch)
-    const votingOnMM = new ethers.Contract(addr, votingArtifact.abi, bp);
-
-    const receipt = makeReceipt(from, optionIndex);
-
-    // Read forwarder from the Voting contract
-    const forwarderAddr = await votingOnMM.trustedForwarder();
-    if (
-      !ethers.isAddress(forwarderAddr) ||
-      forwarderAddr === ethers.ZeroAddress
-    ) {
-      throw new Error("trustedForwarder() is not set on this contract.");
+  async function getSigner() {
+    if (useLocal) {
+      const signer = await getLocalWallet();
+      return { signer, address: await signer.getAddress() };
     }
 
-    const forwarder = new ethers.Contract(
-      forwarderAddr,
-      forwarderArtifact.abi,
-      bp // read-only (relayer executes)
-    );
+    const { signer } = await getMetaMaskSigner();
+    return { signer, address: await signer.getAddress() };
+  }
 
-    const net = await bp.getNetwork();
-    const chainId = Number(net.chainId);
+  async function deriveIdentity(signer, voterAddr) {
+    const msg = `E-Voting ZK Identity\nContract:${addr}\nVoter:${voterAddr}`;
+    const sig = await signer.signMessage(msg);
+    return new Identity(sig);
+  }
 
-    // Encode Voting.vote(optionIndex, receipt)
-    const iface = new ethers.Interface(votingArtifact.abi);
-    const data = iface.encodeFunctionData("vote", [
-      Number(optionIndex),
-      receipt,
-    ]);
+  async function ensureIdentityLinked(signer, voterAddr, identity) {
+    if (!contract) throw new Error("Contract not ready.");
 
-    // Nonce for the forwarder (per-signer)
-    const nonce = await forwarder.nonces(from);
+    const linked = await contract.linkedIdentityCommitment(voterAddr);
+    const linkedCommitment = BigInt(linked.toString());
+    const myCommitment = BigInt(identity.commitment.toString());
 
-    // deadline (10 min) — use BigInt for typed-data correctness
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 10);
+    if (linkedCommitment === 0n) {
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 60 * 10);
+      const payloadHash = await contract.linkPayloadHash(voterAddr, myCommitment, expiry);
+      const signature = await signer.signMessage(ethers.getBytes(payloadHash));
 
-    // Gas: estimation can be flaky for ERC2771 (msg.data differs in real execute),
-    // so just use a safe default.
-    const gas = 500_000n;
+      setVoteMsg("Linking private identity (one-time)…");
+      const r = await fetch(`${RELAYER_URL}/zk-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          votingAddress: addr,
+          voter: voterAddr,
+          identityCommitment: myCommitment.toString(),
+          expiry: expiry.toString(),
+          signature,
+        }),
+      });
 
-    // This object is used ONLY for signing (BigInt is fine here)
-    const requestForSig = {
-      from,
-      to: addr,
-      value: 0n,
-      gas,
-      nonce,
-      deadline,
-      data,
-    };
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out?.error || "Relayer link error");
+      return;
+    }
 
-    // Domain must match Forwarder.sol name:
-    // constructor() ERC2771Forwarder("E-VotingForwarder") {}
-    const domain = {
-      name: "E-VotingForwarder",
-      version: "1",
-      chainId,
-      verifyingContract: forwarderAddr,
-    };
+    if (linkedCommitment !== myCommitment) {
+      throw new Error(
+        "This wallet is already linked to a different private identity on this election. Use the original browser/profile used for first identity setup."
+      );
+    }
+  }
 
-    setVoteMsg("Requesting MetaMask signature (gasless)…");
-    const signature = await signer.signTypedData(
-      domain,
-      FORWARD_TYPES,
-      requestForSig
-    );
+  async function buildGroupFromChain() {
+    if (!contract) throw new Error("Contract not ready.");
 
-    // IMPORTANT: JSON cannot serialize BigInt — send as strings
-    const requestForJson = {
-      from: requestForSig.from,
-      to: requestForSig.to,
-      value: requestForSig.value.toString(),
-      gas: requestForSig.gas.toString(),
-      nonce: requestForSig.nonce.toString(),
-      deadline: requestForSig.deadline.toString(),
-      data: requestForSig.data,
-    };
+    const logs = await contract.queryFilter(contract.filters.IdentityLinked(), 0, "latest");
+    const members = logs.map((log) => BigInt(log.args.identityCommitment.toString()));
 
-    setVoteMsg("Sending to relayer (admin pays gas)…");
-    const r = await fetch(`${RELAYER_URL}/relay`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        forwarder: forwarderAddr,
-        request: requestForJson,
-        signature,
-      }),
-    });
+    if (members.length === 0) {
+      throw new Error("No linked identities found yet.");
+    }
 
-    const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(out?.error || "Relayer error");
-
-    setVoteMsg(
-      `✅ Vote relayed!\nTx:\n${out.txHash}\n\nReceipt:\n${receipt}\n\nForwarder:\n${forwarderAddr}`
-    );
-
-    await load();
+    return new Group(members);
   }
 
   async function castVote() {
     if (!canVote || busy) return;
+
     setBusy(true);
     try {
-      setVoteMsg("Connecting wallet…");
-      if (useLocal) {
-        await castVoteLocal();
-      } else {
-        await castVoteGasless();
+      if (!contract) throw new Error("Contract not ready.");
+
+      setVoteMsg("Connecting signer…");
+      const { signer, address: voterAddr } = await getSigner();
+
+      setVoteMsg("Preparing private identity…");
+      const identity = await deriveIdentity(signer, voterAddr);
+
+      await ensureIdentityLinked(signer, voterAddr, identity);
+
+      setVoteMsg("Building group state…");
+      const group = await buildGroupFromChain();
+      if (group.indexOf(identity.commitment) === -1) {
+        throw new Error("Linked identity not found in group. Please retry in a few seconds.");
       }
+
+      const receipt = ethers.hexlify(ethers.randomBytes(32));
+      const message = await contract.voteMessage(Number(optionIndex), receipt);
+      const scope = await contract.voteScope();
+
+      setVoteMsg("Generating zero-knowledge proof…");
+      const proof = await generateProof(identity, group, message, scope);
+
+      setVoteMsg("Submitting vote via relayer (gasless)…");
+      const r = await fetch(`${RELAYER_URL}/zk-vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          votingAddress: addr,
+          optionIndex: Number(optionIndex),
+          receipt,
+          proof: {
+            merkleTreeDepth: proof.merkleTreeDepth,
+            merkleTreeRoot: proof.merkleTreeRoot,
+            nullifier: proof.nullifier,
+            message: proof.message,
+            scope: proof.scope,
+            points: proof.points.map((p) => p.toString()),
+          },
+        }),
+      });
+
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out?.error || "Relayer vote error");
+
+      setVoteMsg(`✅ Vote relayed privately!\nTx:\n${out.txHash}\n\nReceipt:\n${receipt}`);
+      await load();
     } catch (e) {
       console.error(e);
-      setVoteMsg(
-        "❌ " + (e?.reason || e?.shortMessage || e?.message || String(e))
-      );
+      setVoteMsg("❌ " + normErr(e));
     } finally {
       setBusy(false);
     }
@@ -261,7 +226,6 @@ export default function VotePage() {
     <div className="page">
       <h1>Cast Ballot</h1>
 
-      {/* Auth toggle */}
       <section className="card">
         <label className="field">
           <span>
@@ -271,7 +235,7 @@ export default function VotePage() {
               onChange={(e) => setUseLocal(e.target.checked)}
               style={{ marginRight: 8 }}
             />
-            Use Local Hardhat signer (unchecked = MetaMask gasless)
+            Use Local Hardhat signer (unchecked = MetaMask)
           </span>
         </label>
 
@@ -303,8 +267,7 @@ export default function VotePage() {
           <b>Status:</b> {status || "—"}
         </div>
         <div className="kv">
-          <b>Candidates:</b>{" "}
-          {candidates.length ? candidates.join(", ") : "—"}
+          <b>Candidates:</b> {candidates.length ? candidates.join(", ") : "—"}
         </div>
         <div className="actions">
           <Link className="btn link" to={`/election/${addr}`}>
