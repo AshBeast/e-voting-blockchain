@@ -1,31 +1,34 @@
 // src/pages/AdminPage.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers, NonceManager } from "ethers";
 import votingArtifact from "../Voting.json";
-import forwarderArtifact from "../Forwarder.json";
+import semaphoreArtifact from "../Semaphore.json";
+import semaphoreVerifierArtifact from "../SemaphoreVerifier.json";
+import poseidonArtifact from "../PoseidonT3.json";
 
-// Prefer remote RPC (Sepolia) if set, otherwise local Hardhat, otherwise default localhost
 const RPC =
   import.meta.env.VITE_RPC_URL ||
   import.meta.env.VITE_LOCAL_RPC ||
   "http://127.0.0.1:8545";
 
 const DEFAULT_ADDR = (import.meta.env.VITE_CONTRACT_ADDRESS || "").trim();
-const ENV_FORWARDER = (import.meta.env.VITE_FORWARDER_ADDRESS || "").trim();
+const DEFAULT_RELAYER = (import.meta.env.VITE_RELAYER_ADDRESS || "").trim();
 
 const MGMT_ABI = [
   "function admin() view returns (address)",
+  "function relayer() view returns (address)",
+  "function semaphore() view returns (address)",
   "function status() view returns (string)",
   "function electionInfo() view returns (string,uint64,uint64)",
+  "function groupSize() view returns (uint256)",
   "function registerVoters(address[] addrs)",
   "function updateWindow(uint64 _startTs, uint64 _endTs)",
+  "function updateRelayer(address newRelayer)",
   "function closeEarly()",
 ];
 
-/* ------------ helpers ------------ */
 const toUnix = (s) => Math.floor(new Date(s).getTime() / 1000);
 
-// unix seconds -> "YYYY-MM-DDTHH:MM:SS" (local time) for datetime-local inputs
 function toLocalInputValue(tsSec) {
   if (!tsSec) return "";
   const d = new Date(tsSec * 1000);
@@ -47,7 +50,6 @@ function fmtTs(tsSec) {
   });
 }
 
-// do NOT early-return on a bad token; just skip it
 function parseAddresses(input) {
   const re = /0x[a-fA-F0-9]{40}\b/g;
   const raw = input.match(re) || [];
@@ -61,7 +63,7 @@ function parseAddresses(input) {
         out.push(ck);
       }
     } catch {
-      // skip invalid substrings, don't return
+      // skip invalid candidates
     }
   }
   return out;
@@ -76,18 +78,56 @@ async function hasCode(provider, addr) {
   }
 }
 
+function artifactBytecode(bytecode) {
+  if (typeof bytecode === "string") return bytecode;
+  if (bytecode && typeof bytecode.object === "string") return bytecode.object;
+  return "";
+}
+
+function linkArtifactBytecode(artifact, libraries) {
+  const raw = artifactBytecode(artifact?.bytecode);
+  if (!raw || raw === "0x") {
+    throw new Error(`Missing bytecode for ${artifact?.contractName || "contract"}.`);
+  }
+
+  const refs = artifact?.linkReferences || {};
+  const fileNames = Object.keys(refs);
+  if (fileNames.length === 0) return raw;
+
+  const linked = raw.startsWith("0x") ? raw.slice(2).split("") : raw.split("");
+
+  for (const fileName of fileNames) {
+    const byLibrary = refs[fileName] || {};
+    for (const libName of Object.keys(byLibrary)) {
+      const fqName = `${fileName}:${libName}`;
+      const libAddr = libraries[fqName] || libraries[libName];
+      if (!libAddr || !ethers.isAddress(libAddr)) {
+        throw new Error(`Missing linked library address for ${fqName}.`);
+      }
+
+      const addrHex = ethers.getAddress(libAddr).slice(2).toLowerCase();
+      const positions = byLibrary[libName] || [];
+      for (const pos of positions) {
+        const start = pos.start * 2;
+        const length = pos.length * 2;
+        linked.splice(start, length, ...addrHex);
+      }
+    }
+  }
+
+  return `0x${linked.join("")}`;
+}
+
 export default function AdminPage() {
+  const createLockRef = useRef(false);
   const [provider, setProvider] = useState(null);
 
   useEffect(() => {
     setProvider(new ethers.JsonRpcProvider(RPC));
   }, []);
 
-  /* --------------- tabs --------------- */
-  const [tab, setTab] = useState("create"); // "create" | "manage"
+  const [tab, setTab] = useState("create");
 
-  /* --------------- auth mode --------------- */
-  // persist auth prefs so reload keeps your “login”
   const [useLocal, setUseLocal] = useState(
     () => localStorage.getItem("admin.useLocal") === "1"
   );
@@ -111,33 +151,50 @@ export default function AdminPage() {
       if (!provider) throw new Error("Provider not ready (RPC misconfigured).");
       const base = new ethers.Wallet(adminPk, provider);
       return new NonceManager(base);
-    } else {
-      if (!window.ethereum) throw new Error("MetaMask not found");
-      const bp = new ethers.BrowserProvider(window.ethereum);
-      await bp.send("eth_requestAccounts", []);
-      const base = await bp.getSigner();
-      return new NonceManager(base);
     }
+
+    if (!window.ethereum) throw new Error("MetaMask not found");
+    const bp = new ethers.BrowserProvider(window.ethereum);
+    await bp.send("eth_requestAccounts", []);
+    const base = await bp.getSigner();
+    return new NonceManager(base);
   }
 
-  /* ============= CREATE ELECTION ============= */
   const [title, setTitle] = useState("");
   const [cands, setCands] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [voterBlob, setVoterBlob] = useState("");
+  const [createRelayer, setCreateRelayer] = useState(DEFAULT_RELAYER);
+  const [createSemaphore, setCreateSemaphore] = useState(
+    () => localStorage.getItem("last_semaphore") || ""
+  );
   const [createMsg, setCreateMsg] = useState("");
   const [deployedAddr, setDeployedAddr] = useState("");
   const [busyCreate, setBusyCreate] = useState(false);
 
   async function deployAndRegister() {
-    if (busyCreate) return; // guard against double clicks
+    if (busyCreate || createLockRef.current) return;
+    createLockRef.current = true;
     setBusyCreate(true);
+
     try {
       setCreateMsg(useLocal ? "Connecting Hardhat…" : "Connecting MetaMask…");
       const signer = await getSigner();
       const sp = signer?.provider || provider;
       if (!sp) throw new Error("Provider not ready.");
+
+      if (!useLocal && provider) {
+        const [walletNet, rpcNet] = await Promise.all([
+          sp.getNetwork(),
+          provider.getNetwork(),
+        ]);
+        if (walletNet.chainId !== rpcNet.chainId) {
+          throw new Error(
+            `Network mismatch. MetaMask is on chain ${walletNet.chainId.toString()}, but UI RPC is on chain ${rpcNet.chainId.toString()}.`
+          );
+        }
+      }
 
       const startTs = toUnix(start);
       const endTs = toUnix(end);
@@ -146,90 +203,106 @@ export default function AdminPage() {
         .map((s) => s.trim())
         .filter(Boolean);
       const voters = parseAddresses(voterBlob);
+      const relayerAddr = createRelayer.trim();
 
       if (!title || candidates.length < 2)
         throw new Error("Need a title and ≥ 2 candidates");
       if (!(startTs > 0 && endTs > startTs)) throw new Error("Bad time window");
       if (voters.length === 0)
         throw new Error("Provide at least one eligible voter address");
+      if (!ethers.isAddress(relayerAddr))
+        throw new Error("Provide a valid relayer address.");
 
-      // --- 1) Get / deploy forwarder (trustedForwarder) ---
-      let forwarderAddr = "";
-
-      // Prefer: ENV var -> last_forwarder -> deploy new
-      const lastForwarder = (localStorage.getItem("last_forwarder") || "").trim();
-
-      const candidatesForwarderAddrs = [ENV_FORWARDER, lastForwarder].filter(Boolean);
-
-      for (const candAddr of candidatesForwarderAddrs) {
-        if (ethers.isAddress(candAddr) && (await hasCode(sp, candAddr))) {
-          forwarderAddr = ethers.getAddress(candAddr);
-          break;
-        }
+      let semaphoreAddr = createSemaphore.trim();
+      if (semaphoreAddr && !ethers.isAddress(semaphoreAddr)) {
+        throw new Error("Semaphore address is invalid.");
       }
 
-      if (!forwarderAddr) {
-        setCreateMsg("Deploying trusted forwarder…");
-        const fFactory = new ethers.ContractFactory(
-          forwarderArtifact.abi,
-          forwarderArtifact.bytecode,
+      if (!semaphoreAddr || !(await hasCode(sp, semaphoreAddr))) {
+        setCreateMsg("Deploying Poseidon library…");
+        const poseidonFactory = new ethers.ContractFactory(
+          poseidonArtifact.abi,
+          poseidonArtifact.bytecode,
           signer
         );
+        const poseidon = await poseidonFactory.deploy();
+        await poseidon.deploymentTransaction().wait();
+        const poseidonAddr = await poseidon.getAddress();
 
-        // Most forwarders (e.g., OZ MinimalForwarder) have no constructor args
-        const fwd = await fFactory.deploy();
-        setCreateMsg("Waiting for forwarder deployment confirmation…");
-        await fwd.deploymentTransaction().wait();
-        forwarderAddr = await fwd.getAddress();
+        setCreateMsg("Deploying Semaphore verifier…");
+        const verifierFactory = new ethers.ContractFactory(
+          semaphoreVerifierArtifact.abi,
+          semaphoreVerifierArtifact.bytecode,
+          signer
+        );
+        const verifier = await verifierFactory.deploy();
+        await verifier.deploymentTransaction().wait();
 
-        localStorage.setItem("last_forwarder", forwarderAddr);
+        setCreateMsg("Deploying Semaphore…");
+        const linkedSemaphoreBytecode = linkArtifactBytecode(semaphoreArtifact, {
+          "poseidon-solidity/PoseidonT3.sol:PoseidonT3": poseidonAddr,
+          PoseidonT3: poseidonAddr,
+        });
+        const semaphoreFactory = new ethers.ContractFactory(
+          semaphoreArtifact.abi,
+          linkedSemaphoreBytecode,
+          signer
+        );
+        const semaphore = await semaphoreFactory.deploy(await verifier.getAddress());
+        await semaphore.deploymentTransaction().wait();
+
+        semaphoreAddr = await semaphore.getAddress();
+        setCreateSemaphore(semaphoreAddr);
+        localStorage.setItem("last_semaphore", semaphoreAddr);
       }
 
-      // --- 2) Deploy Voting with NEW constructor (5 args) ---
-      setCreateMsg(`Deploying election… (forwarder: ${forwarderAddr})`);
+      setCreateMsg(`Deploying election… (relayer: ${relayerAddr})`);
       const factory = new ethers.ContractFactory(
         votingArtifact.abi,
         votingArtifact.bytecode,
         signer
       );
 
-      // NEW constructor signature: (title, candidates, startTs, endTs, trustedForwarder)
       const contract = await factory.deploy(
         title,
         candidates,
         BigInt(startTs),
         BigInt(endTs),
-        forwarderAddr
+        relayerAddr,
+        semaphoreAddr
       );
 
       setCreateMsg("Waiting for election deployment confirmation…");
       const rcpt = await contract.deploymentTransaction().wait();
       const addr = rcpt.contractAddress ?? (await contract.getAddress());
       setDeployedAddr(addr);
-
-      // remember last deployed for quick use
       localStorage.setItem("last_contract", addr);
 
-      // --- 3) Register voters ---
       const bound = new ethers.Contract(addr, votingArtifact.abi, signer);
-      setCreateMsg(`Registering ${voters.length} voters…`);
-      const regTx = await bound.registerVoters(voters);
-      await regTx.wait();
+      try {
+        setCreateMsg(`Registering ${voters.length} voters…`);
+        const regTx = await bound.registerVoters(voters);
+        await regTx.wait();
+      } catch (regErr) {
+        const msg = regErr?.reason || regErr?.shortMessage || regErr?.message || String(regErr);
+        setCreateMsg(
+          `⚠️ Contract deployed, but voter registration failed.\nContract: ${addr}\nRelayer: ${relayerAddr}\nSemaphore: ${semaphoreAddr}\nError: ${msg}`
+        );
+        return;
+      }
 
       setCreateMsg(
-        `✅ Deployed & registered.\nContract: ${addr}\nForwarder: ${forwarderAddr}`
+        `✅ Deployed & registered.\nContract: ${addr}\nRelayer: ${relayerAddr}\nSemaphore: ${semaphoreAddr}`
       );
     } catch (e) {
       console.error(e);
-      setCreateMsg(
-        "❌ " + (e.reason || e.shortMessage || e.message || String(e))
-      );
+      setCreateMsg("❌ " + (e.reason || e.shortMessage || e.message || String(e)));
     } finally {
+      createLockRef.current = false;
       setBusyCreate(false);
     }
   }
 
-  /* ============= MANAGE EXISTING ============= */
   const [attachAddr, setAttachAddr] = useState(
     () => localStorage.getItem("admin.attach") || DEFAULT_ADDR
   );
@@ -241,20 +314,21 @@ export default function AdminPage() {
   const [mgmt, setMgmt] = useState({
     contract: null,
     admin: "",
+    relayer: "",
+    semaphore: "",
     you: "",
     title: "",
     startTs: 0,
     endTs: 0,
     status: "",
+    groupSize: 0,
   });
   const [busyManage, setBusyManage] = useState(false);
 
-  // manage inputs (seconds-capable)
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
-
-  // register more voters before start
   const [moreVotersBlob, setMoreVotersBlob] = useState("");
+  const [newRelayer, setNewRelayer] = useState("");
 
   const isAdmin = useMemo(() => {
     return (
@@ -270,6 +344,7 @@ export default function AdminPage() {
   async function attach() {
     if (busyManage) return;
     setBusyManage(true);
+
     try {
       setMgmtMsg("Checking address…");
       if (!ethers.isAddress(attachAddr))
@@ -283,23 +358,19 @@ export default function AdminPage() {
       const c = new ethers.Contract(attachAddr, MGMT_ABI, provider);
 
       setMgmtMsg("Loading election info…");
-      let admin = "";
-      try {
-        admin = await c.admin();
-      } catch {
-        // admin() might not exist; ignore
-      }
-
+      const admin = await c.admin();
+      const relayer = await c.relayer();
+      const semaphore = await c.semaphore();
       const [nm, sTs, eTs] = await c.electionInfo();
       const st = await c.status();
+      const groupSize = Number(await c.groupSize());
 
-      // who are you?
       let you = "";
       try {
         const signer = await getSigner();
         you = await signer.getAddress();
       } catch {
-        // signer might not be available; ignore
+        // ignore
       }
 
       const sNum = Number(sTs);
@@ -308,16 +379,19 @@ export default function AdminPage() {
       setMgmt({
         contract: c,
         admin,
+        relayer,
+        semaphore,
         you,
         title: nm,
         startTs: sNum,
         endTs: eNum,
         status: st,
+        groupSize,
       });
 
-      // Prefill window fields (with seconds)
       setNewStart(toLocalInputValue(sNum));
       setNewEnd(toLocalInputValue(eNum));
+      setNewRelayer(relayer);
 
       setMgmtMsg("✅ Attached.");
     } catch (e) {
@@ -326,15 +400,19 @@ export default function AdminPage() {
       setMgmt({
         contract: null,
         admin: "",
+        relayer: "",
+        semaphore: "",
         you: "",
         title: "",
         startTs: 0,
         endTs: 0,
         status: "",
+        groupSize: 0,
       });
       setNewStart("");
       setNewEnd("");
       setMoreVotersBlob("");
+      setNewRelayer("");
     } finally {
       setBusyManage(false);
     }
@@ -352,43 +430,29 @@ export default function AdminPage() {
       const write = mgmt.contract.connect(signer);
       const your = await signer.getAddress();
 
-      // Admin check (only if admin was readable)
       if (mgmt.admin && your.toLowerCase() !== mgmt.admin.toLowerCase()) {
         throw new Error(`You are not the admin. Admin is ${mgmt.admin}`);
       }
 
-      // Execute closeEarly()
       setMgmtMsg("Ending election…");
       const tx = await write.closeEarly();
       setMgmtMsg(`Waiting for confirmation… (tx: ${tx.hash})`);
       await tx.wait();
 
-      // Refresh from chain
       const [, sTs, eTs] = await mgmt.contract.electionInfo();
       const st = await mgmt.contract.status();
 
       const sNum = Number(sTs);
       const eNum = Number(eTs);
 
-      setMgmt((m) => ({
-        ...m,
-        startTs: sNum,
-        endTs: eNum,
-        status: st,
-        you: your,
-      }));
-
-      // Keep window inputs aligned
+      setMgmt((m) => ({ ...m, startTs: sNum, endTs: eNum, status: st, you: your }));
       setNewStart(toLocalInputValue(sNum));
       setNewEnd(toLocalInputValue(eNum));
 
       setMgmtMsg("✅ Election ended (closeEarly confirmed).");
-      return;
     } catch (e) {
       console.error(e);
-      setMgmtMsg(
-        "❌ " + (e?.reason || e?.shortMessage || e?.message || String(e))
-      );
+      setMgmtMsg("❌ " + (e?.reason || e?.shortMessage || e?.message || String(e)));
     } finally {
       setBusyManage(false);
     }
@@ -400,7 +464,6 @@ export default function AdminPage() {
 
     try {
       if (!mgmt.contract) throw new Error("Attach a contract first.");
-
       if (hasStarted)
         throw new Error("Election already started. Window cannot be updated.");
 
@@ -427,28 +490,17 @@ export default function AdminPage() {
 
       const [, sTs, eTs] = await mgmt.contract.electionInfo();
       const st = await mgmt.contract.status();
-
       const sNum = Number(sTs);
       const eNum = Number(eTs);
 
-      setMgmt((m) => ({
-        ...m,
-        startTs: sNum,
-        endTs: eNum,
-        status: st,
-        you: your,
-      }));
-
+      setMgmt((m) => ({ ...m, startTs: sNum, endTs: eNum, status: st, you: your }));
       setNewStart(toLocalInputValue(sNum));
       setNewEnd(toLocalInputValue(eNum));
 
       setMgmtMsg("✅ Election window updated.");
-      return;
     } catch (e) {
       console.error(e);
-      setMgmtMsg(
-        "❌ " + (e?.reason || e?.shortMessage || e?.message || String(e))
-      );
+      setMgmtMsg("❌ " + (e?.reason || e?.shortMessage || e?.message || String(e)));
     } finally {
       setBusyManage(false);
     }
@@ -460,7 +512,6 @@ export default function AdminPage() {
 
     try {
       if (!mgmt.contract) throw new Error("Attach a contract first.");
-
       if (hasStarted)
         throw new Error("Election already started. Registration is closed.");
 
@@ -477,7 +528,6 @@ export default function AdminPage() {
         throw new Error(`You are not the admin. Admin is ${mgmt.admin}`);
       }
 
-      // Batch to avoid gas blowups
       const BATCH = 200;
       setMgmtMsg(`Registering ${addrs.length} voters…`);
 
@@ -485,27 +535,51 @@ export default function AdminPage() {
         const chunk = addrs.slice(i, i + BATCH);
         const tx = await write.registerVoters(chunk);
         setMgmtMsg(
-          `Registering ${addrs.length} voters… (batch ${Math.floor(i / BATCH) + 1}/${Math.ceil(
-            addrs.length / BATCH
-          )})`
+          `Registering ${addrs.length} voters… (batch ${
+            Math.floor(i / BATCH) + 1
+          }/${Math.ceil(addrs.length / BATCH)})`
         );
         await tx.wait();
       }
 
       setMoreVotersBlob("");
-
       const st = await mgmt.contract.status();
       setMgmt((m) => ({ ...m, status: st, you: your }));
 
-      setMgmtMsg(
-        `✅ Registered ${addrs.length} additional voters. (or was already registered)`
-      );
-      return;
+      setMgmtMsg(`✅ Registered ${addrs.length} additional voters.`);
     } catch (e) {
       console.error(e);
-      setMgmtMsg(
-        "❌ " + (e?.reason || e?.shortMessage || e?.message || String(e))
-      );
+      setMgmtMsg("❌ " + (e?.reason || e?.shortMessage || e?.message || String(e)));
+    } finally {
+      setBusyManage(false);
+    }
+  }
+
+  async function updateRelayer() {
+    if (busyManage) return;
+    setBusyManage(true);
+
+    try {
+      if (!mgmt.contract) throw new Error("Attach a contract first.");
+      if (!ethers.isAddress(newRelayer)) throw new Error("Bad relayer address.");
+
+      const signer = await getSigner();
+      const write = mgmt.contract.connect(signer);
+      const your = await signer.getAddress();
+
+      if (mgmt.admin && your.toLowerCase() !== mgmt.admin.toLowerCase()) {
+        throw new Error(`You are not the admin. Admin is ${mgmt.admin}`);
+      }
+
+      const tx = await write.updateRelayer(newRelayer);
+      setMgmtMsg(`Updating relayer… (tx: ${tx.hash})`);
+      await tx.wait();
+
+      setMgmt((m) => ({ ...m, relayer: ethers.getAddress(newRelayer), you: your }));
+      setMgmtMsg("✅ Relayer updated.");
+    } catch (e) {
+      console.error(e);
+      setMgmtMsg("❌ " + (e?.reason || e?.shortMessage || e?.message || String(e)));
     } finally {
       setBusyManage(false);
     }
@@ -515,7 +589,6 @@ export default function AdminPage() {
     <div className="page" data-testid="admin-page">
       <h1>Admin</h1>
 
-      {/* Auth toggle used by BOTH panes */}
       <section className="card" data-testid="admin-auth-card">
         <label className="field">
           <span>
@@ -548,7 +621,6 @@ export default function AdminPage() {
         )}
       </section>
 
-      {/* Tabs */}
       <div className="actions mb8" data-testid="admin-tabs">
         <button
           className="btn"
@@ -619,6 +691,30 @@ export default function AdminPage() {
           </div>
 
           <label className="field">
+            <span>Relayer Address</span>
+            <input
+              className="input mono"
+              value={createRelayer}
+              onChange={(e) => setCreateRelayer(e.target.value.trim())}
+              placeholder="0x… relayer wallet"
+            />
+          </label>
+
+          <label className="field">
+            <span>Semaphore Address (optional, auto-deploy if empty)</span>
+            <input
+              className="input mono"
+              value={createSemaphore}
+              onChange={(e) => setCreateSemaphore(e.target.value.trim())}
+              placeholder="0x…"
+            />
+          </label>
+          <div className="hint">
+            If empty, deployment includes Poseidon + Semaphore verifier + Semaphore + Voting +
+            voter registration (multiple MetaMask confirmations and gas).
+          </div>
+
+          <label className="field">
             <span>Eligible Voter Addresses (paste; only addresses are used)</span>
             <textarea
               className="input mono"
@@ -626,11 +722,7 @@ export default function AdminPage() {
               style={{ minHeight: 120 }}
               value={voterBlob}
               onChange={(e) => setVoterBlob(e.target.value)}
-              placeholder={`Paste lines like:
-Account #0: 0xf39F... (10000 ETH)
-Account #1: 0x7099...
-… etc …
-`}
+              placeholder={`Paste lines like:\nAccount #1: 0x...\nAccount #2: 0x...`}
             />
           </label>
 
@@ -690,60 +782,71 @@ Account #1: 0x7099...
 
           {mgmt.contract && (
             <div data-testid="manage-details">
-              <div className="kv mt8" data-testid="manage-admin-row">
-                <b>Admin:</b>{" "}
-                <span className="mono" data-testid="manage-admin">
-                  {mgmt.admin || "— (no admin() in ABI?)"}
-                </span>
+              <div className="kv mt8">
+                <b>Admin:</b> <span className="mono">{mgmt.admin}</span>
+              </div>
+              <div className="kv">
+                <b>You:</b> <span className="mono">{mgmt.you || "—"}</span>
+              </div>
+              <div className="kv">
+                <b>Relayer:</b> <span className="mono">{mgmt.relayer || "—"}</span>
+              </div>
+              <div className="kv">
+                <b>Semaphore:</b>{" "}
+                <span className="mono">{mgmt.semaphore || "—"}</span>
+              </div>
+              <div className="kv">
+                <b>Status:</b> {mgmt.status || "—"}
+              </div>
+              <div className="kv">
+                <b>Title:</b> {mgmt.title || "—"}
+              </div>
+              <div className="kv">
+                <b>Start:</b> {fmtTs(mgmt.startTs)}
+              </div>
+              <div className="kv">
+                <b>End:</b> {fmtTs(mgmt.endTs)}
+              </div>
+              <div className="kv">
+                <b>Linked Identities:</b> {mgmt.groupSize}
+              </div>
+              <div className="kv">
+                <b>Admin?</b> {isAdmin ? "✅ yes" : "❌ no"}
               </div>
 
-              <div className="kv" data-testid="manage-you-row">
-                <b>You:</b>{" "}
-                <span className="mono" data-testid="manage-you">
-                  {mgmt.you || "— (connect signer above)"}
-                </span>
+              <div className="kv mt12">
+                <b>Update Relayer</b>
+              </div>
+              <label className="field">
+                <span>New Relayer Address</span>
+                <input
+                  className="input mono"
+                  value={newRelayer}
+                  onChange={(e) => setNewRelayer(e.target.value.trim())}
+                  disabled={!isAdmin || busyManage}
+                  placeholder="0x…"
+                />
+              </label>
+              <div className="actions mt8">
+                <button
+                  className="btn"
+                  onClick={updateRelayer}
+                  disabled={!isAdmin || busyManage}
+                >
+                  Update Relayer
+                </button>
               </div>
 
-              <div className="kv" data-testid="manage-status-row">
-                <b>Status:</b>{" "}
-                <span data-testid="manage-status">{mgmt.status || "—"}</span>
-              </div>
-
-              <div className="kv" data-testid="manage-title-row">
-                <b>Title:</b>{" "}
-                <span data-testid="manage-title">{mgmt.title || "—"}</span>
-              </div>
-
-              <div className="kv" data-testid="manage-start-row">
-                <b>Start:</b>{" "}
-                <span data-testid="manage-start">{fmtTs(mgmt.startTs)}</span>
-              </div>
-
-              <div className="kv" data-testid="manage-end-row">
-                <b>End:</b>{" "}
-                <span data-testid="manage-end">{fmtTs(mgmt.endTs)}</span>
-              </div>
-
-              <div className="kv" data-testid="manage-isadmin-row">
-                <b>Admin? </b>
-                <span data-testid="manage-isadmin">
-                  {isAdmin ? "✅ yes" : "❌ no"}
-                </span>
-              </div>
-
-              {/* Update Window (before start) */}
-              <div className="kv mt12" data-testid="manage-update-window-title">
+              <div className="kv mt12">
                 <b>Update Window (before start)</b>
               </div>
-
-              <div className="grid2" data-testid="manage-update-window-grid">
+              <div className="grid2">
                 <label className="field">
                   <span>New Start (local)</span>
                   <input
                     type="datetime-local"
                     step="1"
                     className="input"
-                    data-testid="manage-new-start"
                     value={newStart}
                     onChange={(e) => setNewStart(e.target.value)}
                     disabled={!isAdmin || busyManage || hasStarted}
@@ -756,18 +859,15 @@ Account #1: 0x7099...
                     type="datetime-local"
                     step="1"
                     className="input"
-                    data-testid="manage-new-end"
                     value={newEnd}
                     onChange={(e) => setNewEnd(e.target.value)}
                     disabled={!isAdmin || busyManage || hasStarted}
                   />
                 </label>
               </div>
-
               <div className="actions mt8">
                 <button
                   className="btn"
-                  data-testid="manage-update-window"
                   onClick={updateElectionWindow}
                   disabled={!isAdmin || busyManage || hasStarted}
                 >
@@ -775,31 +875,23 @@ Account #1: 0x7099...
                 </button>
               </div>
 
-              {/* Register More Voters (before start) */}
-              <div className="kv mt12" data-testid="manage-register-more-title">
+              <div className="kv mt12">
                 <b>Register More Voters (before start)</b>
               </div>
-
               <label className="field">
                 <span>Additional Voter Addresses</span>
                 <textarea
                   className="input mono"
-                  data-testid="manage-more-voters"
                   style={{ minHeight: 100 }}
                   value={moreVotersBlob}
                   onChange={(e) => setMoreVotersBlob(e.target.value)}
-                  placeholder={`Paste addresses here:
-0xabc...
-0xdef...
-`}
+                  placeholder={`Paste addresses here:\n0xabc...\n0xdef...`}
                   disabled={!isAdmin || busyManage || hasStarted}
                 />
               </label>
-
               <div className="actions mt8">
                 <button
                   className="btn"
-                  data-testid="manage-register-more"
                   onClick={registerMoreVoters}
                   disabled={!isAdmin || busyManage || hasStarted}
                 >
@@ -807,11 +899,9 @@ Account #1: 0x7099...
                 </button>
               </div>
 
-              {/* End Election Now */}
               <div className="actions mt12">
                 <button
                   className="btn"
-                  data-testid="manage-end-now"
                   onClick={endElectionNow}
                   disabled={!isAdmin || busyManage}
                 >

@@ -5,32 +5,28 @@ const yargs = require("yargs/yargs");
 const { hideBin } = require("yargs/helpers");
 
 async function main() {
-  // Parse CLI flags (optional)
   const argv = yargs(hideBin(process.argv))
     .option("contract", {
       type: "string",
       alias: "c",
       describe: "Voting contract address",
+      demandOption: true,
     })
-    .option("pk", {
+    .option("voterPk", {
       type: "string",
-      alias: "k",
-      describe: "Private key of voter (0x...)",
+      describe: "Voter private key (0x...)",
+      demandOption: true,
     })
-    .option("mnemonic", {
+    .option("relayerPk", {
       type: "string",
-      alias: "m",
-      describe: "BIP39 mnemonic (alternative to pk)",
+      describe: "Relayer private key (0x...)",
+      demandOption: true,
     })
     .option("option", {
       type: "number",
       alias: "o",
       describe: "Candidate index (0-based)",
-    })
-    .option("nonce", {
-      type: "string",
-      alias: "n",
-      describe: "Optional nonce (hex). Random if omitted",
+      demandOption: true,
     })
     .option("rpc", {
       type: "string",
@@ -41,69 +37,84 @@ async function main() {
     .help()
     .parse();
 
-  // Resolve config: ENV takes precedence, then flags
-  const CONTRACT = process.env.CONTRACT || argv.contract;
-  const PK = process.env.PK || argv.pk;
-  const MNEMONIC = process.env.MNEMONIC || argv.mnemonic;
-  const OPTION =
+  const contractAddr = process.env.CONTRACT || argv.contract;
+  const voterPk = process.env.VOTER_PK || argv.voterPk;
+  const relayerPk = process.env.RELAYER_PK || argv.relayerPk;
+  const optionIndex =
     process.env.OPTION !== undefined
       ? Number(process.env.OPTION)
-      : argv.option !== undefined
-      ? Number(argv.option)
-      : undefined;
-  const RPC = process.env.RPC || argv.rpc || "http://127.0.0.1:8545";
+      : Number(argv.option);
+  const rpc = process.env.RPC || argv.rpc;
 
-  // Validate inputs
-  if (!CONTRACT)
-    throw new Error("Missing contract address (CONTRACT env or --contract).");
-  if (OPTION === undefined || Number.isNaN(OPTION))
-    throw new Error("Missing/invalid OPTION (env or --option).");
-  if (!PK && !MNEMONIC)
-    throw new Error("Provide either PK env/--pk or MNEMONIC env/--mnemonic.");
-
-  const provider = new ethers.JsonRpcProvider(RPC);
-
-  // Build wallet
-  let wallet;
-  if (PK) {
-    wallet = new ethers.Wallet(PK, provider);
-  } else {
-    wallet = ethers.Wallet.fromPhrase(MNEMONIC).connect(provider);
+  if (!ethers.isAddress(contractAddr)) throw new Error("Bad contract address");
+  if (!voterPk?.startsWith("0x") || !relayerPk?.startsWith("0x")) {
+    throw new Error("VOTER_PK and RELAYER_PK must be 0x... private keys");
   }
-  const addr = await wallet.getAddress();
-  console.log("Using wallet address:", addr);
-
-  // Attach contract with signer
-  const voting = await ethers.getContractAt("Voting", CONTRACT, wallet);
-
-  // Registration & double-vote checks
-  const isRegistered = await voting.registered(addr);
-  if (!isRegistered) {
-    console.error(
-      "Address is NOT registered. Ask admin to register this address first."
-    );
-    process.exit(1);
-  }
-  const already = await voting.hasVoted(addr);
-  if (already) {
-    console.error("This address has already voted.");
-    process.exit(1);
+  if (!Number.isInteger(optionIndex) || optionIndex < 0) {
+    throw new Error("Bad option index");
   }
 
-  // Build receipt = keccak256(address, optionIndex, nonce)
-  const nonce = argv.nonce ?? "0x" + randomBytes(16).toString("hex");
-  const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["address", "uint256", "bytes"],
-    [addr, OPTION, nonce]
+  const provider = new ethers.JsonRpcProvider(rpc);
+  const voter = new ethers.Wallet(voterPk, provider);
+  const relayer = new ethers.Wallet(relayerPk, provider);
+
+  const { Identity } = await import("@semaphore-protocol/identity");
+  const { Group } = await import("@semaphore-protocol/group");
+  const { generateProof } = await import("@semaphore-protocol/proof");
+
+  const voting = await ethers.getContractAt("Voting", contractAddr, provider);
+
+  const voterAddr = await voter.getAddress();
+  if (!(await voting.registered(voterAddr))) {
+    throw new Error("Voter address is not registered by admin");
+  }
+
+  const idMessage = `E-Voting ZK Identity\nContract:${contractAddr}\nVoter:${voterAddr}`;
+  const idSig = await voter.signMessage(idMessage);
+  const identity = new Identity(idSig);
+  const commitment = identity.commitment;
+
+  const linked = await voting.linkedIdentityCommitment(voterAddr);
+  if (linked === 0n) {
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + 60 * 10);
+    const payloadHash = await voting.linkPayloadHash(voterAddr, commitment, expiry);
+    const linkSig = await voter.signMessage(ethers.getBytes(payloadHash));
+
+    const linkTx = await voting
+      .connect(relayer)
+      .linkIdentity(voterAddr, commitment, expiry, linkSig);
+    await linkTx.wait();
+    console.log("✅ Identity linked");
+  }
+
+  const logs = await voting.queryFilter(voting.filters.IdentityLinked(), 0, "latest");
+  const commitments = logs.map((log) => log.args.identityCommitment);
+  const group = new Group(commitments);
+
+  const receipt = ethers.hexlify(randomBytes(32));
+  const message = await voting.voteMessage(optionIndex, receipt);
+  const scope = await voting.voteScope();
+
+  const proof = await generateProof(identity, group, message, scope);
+
+  const tx = await voting.connect(relayer).vote(
+    optionIndex,
+    {
+      merkleTreeDepth: proof.merkleTreeDepth,
+      merkleTreeRoot: proof.merkleTreeRoot,
+      nullifier: proof.nullifier,
+      message: proof.message,
+      scope: proof.scope,
+      points: proof.points,
+    },
+    receipt
   );
-  const receipt = ethers.keccak256(encoded);
 
-  // Cast vote
-  const tx = await voting.vote(OPTION, receipt);
   console.log("Sent tx:", tx.hash);
   await tx.wait();
   console.log("✅ Vote confirmed.");
-  console.log("Nonce:", nonce);
+  console.log("Voter:", voterAddr);
+  console.log("Commitment:", commitment.toString());
   console.log("Receipt:", receipt);
 }
 

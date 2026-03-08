@@ -1,4 +1,4 @@
-# evote-mvp
+# evote-mvp (Semaphore ZK)
 
 Version: 1.2.0
 
@@ -27,12 +27,13 @@ A simple on-chain e-voting MVP built with **Hardhat** (contracts, scripts) and a
 
 ## Overview
 
-This MVP demonstrates a minimal, auditable vote flow:
+This MVP demonstrates a minimal, auditable, privacy-improved vote flow:
 
-- Admin deploys and configures an election (title, candidates, time window).
-- Admin registers eligible voter addresses.
-- Voters cast one vote each during the open window.
-- A **receipt hash** is returned for each vote; voters can verify inclusion without exposing identity or choice.
+- Admin deploys and configures an election (title, candidates, time window, relayer, Semaphore).
+- Admin registers eligible voter wallet addresses.
+- Voter performs a one-time private identity link (`linkIdentity`) for that election.
+- Voter casts a gasless vote through a relayer using a Semaphore zero-knowledge proof.
+- A **receipt hash** is returned for each vote; voters can verify inclusion without exposing wallet-to-choice linkage.
 - **Live tally** is public and updates on each valid vote; voting blocks when the window closes.
 
 ---
@@ -53,7 +54,7 @@ Requirements:
 Usage (high level):
 
 1. **Admin** goes to `https://evote.donkloud.ca/admin`, leaves “Use Local Hardhat signer” **unchecked** so the app uses MetaMask, configures an election, and clicks **Deploy & Register** on Sepolia.
-2. **Voters** go to `https://evote.donkloud.ca`, paste the contract address, attach to the election, and cast ballots using MetaMask.
+2. **Voters** go to `https://evote.donkloud.ca`, paste the contract address, attach to the election, and cast ballots. The wallet signs identity/proof inputs while the relayer submits on-chain vote txs.
 3. Everyone can see the **live tally** and use the **Check Receipt** page to verify inclusion of a receipt hash on-chain.
 
 ---
@@ -101,7 +102,7 @@ Open **two** terminals side-by-side.
 **Terminal A — Hardhat node**
 
 ```bash
-cd evote-mvp
+cd e-voting
 npx hardhat node
 # Leave this running. It prints 20 funded dev accounts with private keys.
 ```
@@ -111,7 +112,7 @@ npx hardhat node
 **Terminal B**
 
 ```bash
-cd evote-mvp/evote-ui
+cd evote-ui
 pnpm install
 ```
 
@@ -146,7 +147,7 @@ Vite will then load `.env.sepolia` (and `.env.sepolia.local` if present) instead
 
 Open the URL printed by Vite (usually `http://localhost:5173`).
 
-### 3) Start the relayer (Gasless voting, Sepolia)
+### 3) Start the relayer (Gasless ZK voting)
 Open a new **Terminal C**
 
 1. Create a relayer env file at:
@@ -160,11 +161,14 @@ RELAYER_PRIVATE_KEY=0x<RELAYER_FUNDED_PRIVATE_KEY>
 ```
 2. Start the relayer:
 ```bash
-cd evote-mvp/evote-ui/relayer
+cd evote-ui/relayer
 node -r dotenv/config server.cjs dotenv_config_path=.env.sepolia
 ```
 
-You should see `{ ok: true, relayer: "...", chainId: 11155111 }`.
+You should see logs like:
+- `Relayer listening on http://localhost:8787`
+- `RPC: ...`
+- `Relayer address: 0x...`
 
 
 
@@ -178,8 +182,10 @@ You should see `{ ok: true, relayer: "...", chainId: 11155111 }`.
    - **Candidates** (comma-separated, e.g., `Alice, Bob, Charlie`)
    - **Start / End** (pick a near-future start and a later end)
    - **Eligible Voter Addresses**: paste the 20 **addresses** printed by Hardhat (the textarea auto-extracts addresses).
-5. Click **Deploy & Register**.
-6. Copy the **new contract address** it prints. If your `.env.local` had an empty `VITE_CONTRACT_ADDRESS`, paste it now and restart `pnpm dev`.
+5. Enter **Relayer Address** (required).
+6. Leave **Semaphore Address** empty to auto-deploy Poseidon + SemaphoreVerifier + Semaphore (or paste an existing deployed Semaphore address).
+7. Click **Deploy & Register**.
+8. Copy the **new contract address** it prints. If your `.env.local` had an empty `VITE_CONTRACT_ADDRESS`, paste it now and restart `pnpm dev`.
 
 ### 5) Voter View — Cast & Verify
 
@@ -187,13 +193,17 @@ You should see `{ ok: true, relayer: "...", chainId: 11155111 }`.
 2. Confirm **Status: OPEN**.
 3. Use any **registered voter** private key (e.g., Account #1 from Hardhat output).
 4. Select a candidate by name.
-5. Click **Cast Vote** → The UI returns a **receipt hash**. Save it.
-6. Try to vote again with the same account → you should see an “already voted” error (by design).
-7. Use the **Check Receipt** page to verify inclusion (returns true/false).
-8. After the end time passes, the status becomes **CLOSED** and voting is blocked.
+5. Click **Cast Vote**:
+   - First vote will auto-run one-time identity linking.
+   - Browser generates ZK proof and sends it to relayer.
+   - Relayer submits the on-chain vote transaction.
+6. The UI returns a **receipt hash**. Save it.
+7. Try to vote again with the same account/identity → you should see `can't vote twice` (by design).
+8. Use the **Check Receipt** page to verify inclusion (returns true/false).
+9. After the end time passes, the status becomes **CLOSED** and voting is blocked.
 
 > **On Sepolia with MetaMask:**  
-> When running against Sepolia (either via the hosted UI or `pnpm dev --mode sepolia`), leave any “Use Local Hardhat signer” option **unchecked**. The app will use your injected wallet (MetaMask) to sign `vote()` transactions, and you do **not** paste private keys into the page.
+> When running against Sepolia (either via the hosted UI or `pnpm dev --mode sepolia`), leave any “Use Local Hardhat signer” option **unchecked**. The app uses MetaMask for identity/link signatures, while the relayer pays gas for on-chain `linkIdentity(...)` and `vote(...)`.
 
 ---
 
@@ -206,24 +216,44 @@ Source: `contracts/Voting.sol`
 - `registerVoters(address[] addrs)` — _onlyAdmin_
 - `closeEarly()` — _onlyAdmin_
 - `updateWindow(uint64 startTs, uint64 endTs)` — _onlyAdmin_
+- `updateRelayer(address newRelayer)` — _onlyAdmin_
 
-### Voting
+### Identity Link (one-time per wallet per election)
 
-- `vote(uint256 optionIndex, bytes32 receipt)` — _inWindow_
+- `linkPayloadHash(address voter, uint256 identityCommitment, uint256 expiry) → bytes32`
+- `linkIdentity(address voter, uint256 identityCommitment, uint256 expiry, bytes signature)` — _onlyRelayer_
+
+### Voting (ZK, gasless via relayer)
+
+- `voteMessage(uint256 optionIndex, bytes32 receipt) → uint256`
+- `vote(uint256 optionIndex, ISemaphore.SemaphoreProof proof, bytes32 receipt)` — _onlyRelayer + inWindow_
 
 ### Read / View
 
+- `admin() → address`
+- `relayer() → address`
+- `semaphore() → address`
+- `semaphoreGroupId() → uint256`
+- `voteScope() → uint256`
+- `registered(address) → bool`
+- `hasLinkedIdentity(address) → bool`
+- `linkedIdentityCommitment(address) → uint256`
 - `candidates() → string[]`
 - `candidateCount() → uint256`
 - `tally() → uint256[]`
 - `hasReceipt(bytes32 receipt) → bool`
+- `groupRoot() → uint256`
+- `groupDepth() → uint256`
+- `groupSize() → uint256`
 - `electionInfo() → (string title, uint64 startTs, uint64 endTs)`
 - `status() → string`
 
 ### Events
 
 - `VoterRegistered(address indexed voter)`
-- `VoteCast(address indexed voter, bytes32 indexed receipt)`
+- `IdentityLinked(uint256 indexed identityCommitment)`
+- `VoteCast(bytes32 indexed receipt)`
+- `RelayerUpdated(address indexed relayer)`
 - `ElectionConfigured(string title, uint64 startTs, uint64 endTs)`
 
 ---
@@ -315,7 +345,7 @@ Steps:
 1. Switch MetaMask to **Sepolia** and ensure you have test ETH.
 2. As admin, open `/admin`, leave “Use Local Hardhat signer” **unchecked**, fill in the election details + voter addresses, and click **Deploy & Register**.
 3. Share the contract address with voters.
-4. Voters open the root URL, paste the contract address, attach to the election, and use MetaMask to sign `vote()` transactions.
+4. Voters open the root URL, paste the contract address, attach to the election, and use MetaMask to sign identity/link inputs while relayer submits vote txs.
 
 ### 2) Local UI in Sepolia mode
 
@@ -325,7 +355,7 @@ If you want to run the UI locally but still talk to Sepolia:
 2. Run:
 
    ```bash
-   cd evote-mvp/evote-ui
+   cd evote-ui
    pnpm dev --mode sepolia
    ```
 
@@ -345,7 +375,7 @@ _Admin deploys `Voting.sol`, network mines the creation tx, then admin registers
 ### 2) Voting flow (state-changing tx)
 
 ![How to vote](/screenshots/how%20to%20vote-2025-10-12-000519.png)  
-_Registered voter signs `vote(optionIndex, receipt)`; contract checks window/eligibility/duplicate and increments tally._
+_Registered voter performs one-time link (if needed), browser generates a Semaphore proof, relayer submits `vote(optionIndex, proof, receipt)`, contract validates proof and increments tally._
 
 ### 3) Receipt verification (read-only `eth_call`)
 
@@ -376,6 +406,7 @@ You should see all suites pass with Mocha output grouped by feature.
 test/
   utils/
     voting-helpers.js
+    snark-artifacts.js
   voting.deployment.spec.js
   voting.admin.spec.js
   voting.registration.spec.js
@@ -383,13 +414,14 @@ test/
   voting.voting.spec.js
   voting.receipts.spec.js
   voting.tally.spec.js
+  voting.zk.integration.spec.js
 ```
 
 ### Helpers include:
 
 - `deployElectionFixture()` – deploys `Voting.sol` with a near-future start and 1-hour window.
 - `openElection(start) / closeEdgeNudge()` – time travel helpers (Hardhat).
-- `makeReceipt(address, optionIndex, nonce)` – computes the vote receipt hash.
+- `makeReceipt(randomBytes32)` – normalizes a 32-byte receipt value.
 - `safeReadCandidates() / safeReadTally()` – compatible with function or public-array getters.
 - `REVERT` – canonical revert strings for consistent assertions.
 
@@ -418,6 +450,9 @@ npx hardhat test test/voting.receipts.spec.js
 
 # Tally aggregation
 npx hardhat test test/voting.tally.spec.js
+
+# Real Semaphore proof integration (may skip if snark artifacts are unavailable)
+npx hardhat test test/voting.zk.integration.spec.js
 ```
 
 #### By Suite (grep-based)
@@ -479,12 +514,12 @@ npx hardhat test --grep "status transitions"
 npx hardhat test --grep "rejects votes before start and after end; allows during window"
 
 # voting.voting.spec.js
-npx hardhat test --grep "registered voter votes once; receipt stored; tally increments"
-npx hardhat test --grep "rejects unregistered voter"
+npx hardhat test --grep "linked identity votes once; receipt stored; tally increments"
+npx hardhat test --grep "rejects link from unregistered voter"
 npx hardhat test --grep "rejects out-of-range candidate index at boundary"
 
 # voting.receipts.spec.js
-npx hardhat test --grep "records inclusion and prevents replay across accounts"
+npx hardhat test --grep "records inclusion and prevents receipt replay"
 
 # voting.tally.spec.js
 npx hardhat test --grep "reflects sum across many voters (5 for A, 3 for B)"
@@ -524,7 +559,7 @@ This suite drives the real web UI against a local Hardhat node to prove the full
 
 4. **Double-Vote Negative**
 
-   - Attempts a second vote from the same wallet → expects “already voted”.
+   - Attempts a second vote from the same identity → expects `can't vote twice`.
 
 5. **Close (CLOSED)**
    - Admin attaches the existing contract → **End Election Now**.
@@ -611,15 +646,34 @@ The same `Voting.sol` contract and React client now run on Sepolia, with MetaMas
 ## Milestone 3 — Completed Deliverables
 
 - Date: **January–February 2026**
-- Goal: Harden the system and add gasless voting using an EIP-2771 forwarder + relayer, while keeping the local demo flow fully testable end-to-end.
+- Goal: Harden the system and add gasless private voting using a relayer + Semaphore zero-knowledge flow, while keeping the local demo flow fully testable end-to-end.
 
 ### What was completed
 
-- **Gasless Voting (EIP-2771)** — implemented OpenZeppelin `ERC2771Forwarder` (`Forwarder.sol`) plus a Node/Express relayer that accepts EIP-712 typed-data signatures, verifies the request (`verify()`), and submits `execute()` while paying gas.
-- **EIP-2771-Aware Voting Contract** — updated `Voting.sol` to use `_msgSender()` and accept a `trustedForwarder` in the constructor so votes are attributed to the voter (not the relayer).
-- **End-to-End Local Flow** — local Hardhat now supports both vote paths:
-  - **Direct vote** (local private key mode), and
-  - **Gasless vote** (MetaMask signs → relayer pays gas).
+- **Semaphore ZK Voting Contract** — `Voting.sol` now links a one-time identity commitment per registered wallet and validates Semaphore proofs in `vote(optionIndex, proof, receipt)`.
+- **Gasless Relayer Flow** — relayer endpoints (`/zk-link`, `/zk-vote`) submit on-chain transactions and pay gas while keeping vote linkage private from wallet address.
+- **Tamper Binding** — proof message binds to `voteMessage(optionIndex, receipt)` so relayer cannot alter option index or receipt.
 - **Playwright E2E Coverage** — core election lifecycle tests pass end-to-end (deploy → register → vote → verify receipt → close).
 - **Admin Ops Exercised** — validated admin operations (`updateWindow`, `closeEarly`) through the UI and tests so elections can be adjusted or ended early.
 - **Audit Layer (Explorer Links)** — added UI affordances to support auditability (links to transactions/events on explorers) so observers can verify on-chain activity without manual log inspection.
+
+### ZK Migration Notes (What Changed)
+
+- Added:
+  - `ISemaphore` integration, per-election Semaphore group, and `voteScope`.
+  - `linkIdentity(voter, identityCommitment, expiry, signature)`.
+  - `vote(optionIndex, proof, receipt)` with `semaphore.validateProof(...)`.
+  - Events `IdentityLinked(identityCommitment)` and `VoteCast(receipt)`.
+  - Relayer API routes for ZK linking and ZK voting.
+- Removed (legacy forwarder path):
+  - OpenZeppelin `ERC2771Forwarder` contract and old forwarder artifacts.
+  - Legacy forwarder helper code in the UI (`gaslessVote.js`).
+  - Old admin UI component tied to forwarder deployment.
+
+### ZK Migration Details (Behavioral Differences)
+
+- **Vote privacy improvement**: old flow exposed `voter + optionIndex` linkage directly (`VoteCast(voter, receipt)` plus clear calldata). New flow emits `VoteCast(receipt)` and validates anonymous membership via Semaphore proof.
+- **One-time identity bootstrap**: each registered wallet links one commitment once per election, then votes privately with proof; this separates public wallet registration from private ballot casting.
+- **Relayer trust reduction**: relayer can submit txs and pay gas, but cannot silently change candidate choice because proof message is bound to `voteMessage(optionIndex, receipt)`.
+- **Duplicate vote handling**: old model relied on `hasVoted[address]`; new model relies on Semaphore nullifier uniqueness (same identity cannot produce two valid votes for the same scope).
+- **Operational cleanup**: forwarder contract/artifacts/helpers were removed to avoid dead paths and confusion in production/testnet runs.

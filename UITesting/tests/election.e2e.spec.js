@@ -238,8 +238,8 @@ test.describe
     await expect(votesCell).toHaveText(/^1$/, { timeout: 20_000 });
   });
 
-  // 6) Double-vote negative (must show “already voted”)
-  test("Double-vote negative (must show 'already voted')", async ({ page }) => {
+  // 6) Double-vote negative (must show duplicate-vote rejection)
+  test("Double-vote negative (must show duplicate-vote rejection)", async ({ page }) => {
     test.skip(!contractAddress, "No contract deployed from previous test");
 
     await page.goto(`/election/${contractAddress}`);
@@ -252,11 +252,9 @@ test.describe
     await page.getByLabel("Candidate").selectOption({ value: "1" });
     await page.getByRole("button", { name: "Cast Vote" }).click();
 
-    const errorLocator = page.locator("pre.hint", {
-      hasText: /already voted/i,
-    });
+    const errorLocator = page.locator("pre.hint", { hasText: /can't vote twice/i });
     await expect(errorLocator).toBeVisible({ timeout: 10_000 });
-    console.log('✅ Double-vote correctly rejected ("already voted" visible)');
+    console.log('✅ Double-vote correctly rejected ("can\'t vote twice" visible)');
   });
 
   // 7) Close early (CLOSED) via Admin → Manage Existing → End Election Now

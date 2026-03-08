@@ -2,6 +2,9 @@ const { expect } = require("chai");
 const {
   REVERT,
   makeReceipt,
+  makeIdentityCommitment,
+  makeMockProof,
+  linkIdentity,
   openElection,
   closeEdgeNudge,
   deployElectionFixture,
@@ -11,9 +14,7 @@ const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("Voting.sol – Access Control (admin)", function () {
   it("only admin can register voters", async function () {
-    const { voting, v1, v2, stranger } = await loadFixture(
-      deployElectionFixture
-    );
+    const { voting, v1, v2, stranger } = await loadFixture(deployElectionFixture);
 
     await expect(
       voting.connect(stranger).registerVoters([v1.address, v2.address])
@@ -42,9 +43,13 @@ describe("Voting.sol – Access Control (admin)", function () {
   });
 
   it("closeEarly requires admin and closes after a 1s tick", async function () {
-    const { voting, start, v1, stranger } = await loadFixture(
-      deployElectionFixture
-    );
+    const { voting, start, relayer, v1, votingAddr, stranger } =
+      await loadFixture(deployElectionFixture);
+
+    await voting.registerVoters([v1.address]);
+    const commitment = makeIdentityCommitment(v1.address, votingAddr);
+    const expiry = start;
+    await linkIdentity(voting, relayer, v1, commitment, expiry);
 
     await expect(voting.connect(stranger).closeEarly()).to.be.revertedWith(
       REVERT.NOT_ADMIN
@@ -55,8 +60,10 @@ describe("Voting.sol – Access Control (admin)", function () {
     await closeEdgeNudge();
     expect(await voting.status()).to.equal("CLOSED");
 
-    const receipt = makeReceipt(v1.address, 0, ethers.randomBytes(32));
-    await expect(voting.connect(v1).vote(0, receipt)).to.be.revertedWith(
+    const receipt = makeReceipt(ethers.randomBytes(32));
+    const root = await voting.groupRoot();
+    const proof = await makeMockProof(voting, 0, receipt, root, 42n);
+    await expect(voting.connect(relayer).vote(0, proof, receipt)).to.be.revertedWith(
       REVERT.NOT_IN_WINDOW
     );
   });
@@ -72,5 +79,12 @@ describe("Voting.sol – Access Control (admin)", function () {
     const { voting } = await loadFixture(deployElectionFixture);
     await expect(voting.updateWindow(100n, 100n)).to.be.reverted;
     await expect(voting.updateWindow(200n, 199n)).to.be.reverted;
+  });
+
+  it("only admin can update relayer", async function () {
+    const { voting, stranger } = await loadFixture(deployElectionFixture);
+    await expect(
+      voting.connect(stranger).updateRelayer(stranger.address)
+    ).to.be.revertedWith(REVERT.NOT_ADMIN);
   });
 });

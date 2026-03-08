@@ -1,7 +1,8 @@
 const { expect } = require("chai");
 const {
   REVERT,
-  makeReceipt,
+  makeIdentityCommitment,
+  makeLinkSignature,
   openElection,
   deployElectionFixture,
   ethers,
@@ -23,18 +24,80 @@ describe("Voting.sol – Registration", function () {
   });
 
   it("duplicate addresses in the same batch are idempotent", async function () {
-    const { voting, start, v1 } = await loadFixture(deployElectionFixture);
+    const { voting, votingAddr, start, relayer, v1 } = await loadFixture(
+      deployElectionFixture
+    );
 
     await voting.registerVoters([v1.address, v1.address]);
     expect(await voting.registered(v1.address)).to.equal(true);
 
-    await openElection(start);
-    const r1 = makeReceipt(v1.address, 0, ethers.randomBytes(32));
-    await voting.connect(v1).vote(0, r1);
+    const commitment = makeIdentityCommitment(v1.address, votingAddr);
+    const expiry = start;
+    const sig1 = await makeLinkSignature(voting, v1, commitment, expiry);
+    await voting
+      .connect(relayer)
+      .linkIdentity(v1.address, commitment, expiry, sig1);
 
-    const r2 = makeReceipt(v1.address, 1, ethers.randomBytes(32));
-    await expect(voting.connect(v1).vote(1, r2)).to.be.revertedWith(
-      REVERT.ALREADY_VOTED
+    const anotherCommitment = BigInt(
+      ethers.solidityPackedKeccak256(
+        ["string", "address", "address"],
+        ["EVOTE_TEST_IDENTITY_2", v1.address, votingAddr]
+      )
     );
+    const sig2 = await makeLinkSignature(voting, v1, anotherCommitment, expiry);
+
+    await expect(
+      voting
+        .connect(relayer)
+        .linkIdentity(v1.address, anotherCommitment, expiry, sig2)
+    ).to.be.revertedWith(REVERT.IDENTITY_LINKED);
+  });
+
+  it("rejects replaying the same link signature on the same election", async function () {
+    const { voting, votingAddr, start, relayer, v1 } = await loadFixture(
+      deployElectionFixture
+    );
+
+    await voting.registerVoters([v1.address]);
+    const commitment = makeIdentityCommitment(v1.address, votingAddr);
+    const sig = await makeLinkSignature(voting, v1, commitment, start);
+
+    await voting.connect(relayer).linkIdentity(v1.address, commitment, start, sig);
+
+    await expect(
+      voting.connect(relayer).linkIdentity(v1.address, commitment, start, sig)
+    ).to.be.revertedWith(REVERT.IDENTITY_LINKED);
+  });
+
+  it("rejects replaying a link signature across elections", async function () {
+    const { voting, relayer, v1, start, end } = await loadFixture(deployElectionFixture);
+    const votingAddrA = await voting.getAddress();
+
+    const MockSemaphore = await ethers.getContractFactory("MockSemaphore");
+    const semaphoreB = await MockSemaphore.deploy();
+    await semaphoreB.waitForDeployment();
+
+    const Voting = await ethers.getContractFactory("Voting");
+    const votingB = await Voting.deploy(
+      "Second Election",
+      ["A", "B"],
+      start,
+      end,
+      relayer.address,
+      await semaphoreB.getAddress()
+    );
+    await votingB.waitForDeployment();
+
+    await voting.registerVoters([v1.address]);
+    await votingB.registerVoters([v1.address]);
+
+    const commitment = makeIdentityCommitment(v1.address, votingAddrA);
+    const sigFromElectionA = await makeLinkSignature(voting, v1, commitment, start);
+
+    await expect(
+      votingB
+        .connect(relayer)
+        .linkIdentity(v1.address, commitment, start, sigFromElectionA)
+    ).to.be.revertedWith("bad link signature");
   });
 });
