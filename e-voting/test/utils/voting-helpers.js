@@ -11,6 +11,7 @@ const REVERT = {
   NOT_REGISTERED: "not registered",
   ALREADY_VOTED: "already voted",
   IDENTITY_LINKED: "identity linked",
+  LINK_CLOSED: "linking closed",
   BAD_OPTION: "bad option",
   NOT_IN_WINDOW: "not in voting window",
   ALREADY_STARTED: "already started",

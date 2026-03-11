@@ -7,6 +7,8 @@ import { Group } from "@semaphore-protocol/group";
 import { generateProof } from "@semaphore-protocol/proof";
 
 import votingArtifact from "../Voting.json";
+import UiIcon from "../components/UiIcon";
+import { addKnownElectionAddress, markVotedLocally } from "../lib/electionStore";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -27,6 +29,9 @@ export default function VotePage() {
   const [contract, setContract] = useState(null);
 
   const [status, setStatus] = useState("");
+  const [title, setTitle] = useState("");
+  const [startTs, setStartTs] = useState(0);
+  const [endTs, setEndTs] = useState(0);
   const [candidates, setCandidates] = useState([]);
   const [optionIndex, setOptionIndex] = useState(0);
 
@@ -61,10 +66,16 @@ export default function VotePage() {
   async function load() {
     if (!contract) return;
     try {
-      const st = await contract.status();
-      const cs = await contract.candidates();
+      const [st, cs, info] = await Promise.all([
+        contract.status(),
+        contract.candidates(),
+        contract.electionInfo(),
+      ]);
       setStatus(st);
       setCandidates(cs);
+      setTitle(info?.[0] || "");
+      setStartTs(Number(info?.[1] || 0));
+      setEndTs(Number(info?.[2] || 0));
     } catch (e) {
       console.error(e);
     }
@@ -79,6 +90,15 @@ export default function VotePage() {
   }, [contract]);
 
   const canVote = useMemo(() => status === "OPEN", [status]);
+
+  function fmt(tsSec) {
+    if (!tsSec) return "—";
+    return new Date(Number(tsSec) * 1000).toLocaleString("en-CA", {
+      timeZone: "America/Vancouver",
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  }
 
   async function getLocalWallet() {
     if (!pk || !pk.startsWith("0x")) {
@@ -112,7 +132,7 @@ export default function VotePage() {
     return new Identity(sig);
   }
 
-  async function ensureIdentityLinked(signer, voterAddr, identity) {
+  async function ensureIdentityReadyForVote(voterAddr, identity) {
     if (!contract) throw new Error("Contract not ready.");
 
     const linked = await contract.linkedIdentityCommitment(voterAddr);
@@ -120,26 +140,9 @@ export default function VotePage() {
     const myCommitment = BigInt(identity.commitment.toString());
 
     if (linkedCommitment === 0n) {
-      const expiry = BigInt(Math.floor(Date.now() / 1000) + 60 * 10);
-      const payloadHash = await contract.linkPayloadHash(voterAddr, myCommitment, expiry);
-      const signature = await signer.signMessage(ethers.getBytes(payloadHash));
-
-      setVoteMsg("Linking private identity (one-time)…");
-      const r = await fetch(`${RELAYER_URL}/zk-link`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          votingAddress: addr,
-          voter: voterAddr,
-          identityCommitment: myCommitment.toString(),
-          expiry: expiry.toString(),
-          signature,
-        }),
-      });
-
-      const out = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(out?.error || "Relayer link error");
-      return;
+      throw new Error(
+        "Identity is not linked for this election. Complete Link Identity during PENDING status first."
+      );
     }
 
     if (linkedCommitment !== myCommitment) {
@@ -175,7 +178,7 @@ export default function VotePage() {
       setVoteMsg("Preparing private identity…");
       const identity = await deriveIdentity(signer, voterAddr);
 
-      await ensureIdentityLinked(signer, voterAddr, identity);
+      await ensureIdentityReadyForVote(voterAddr, identity);
 
       setVoteMsg("Building group state…");
       const group = await buildGroupFromChain();
@@ -212,6 +215,16 @@ export default function VotePage() {
       const out = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(out?.error || "Relayer vote error");
 
+      const net = await contract.runner.provider.getNetwork();
+      markVotedLocally({
+        chainId: net.chainId.toString(),
+        electionAddress: addr,
+        voterAddress: voterAddr,
+        receipt,
+        txHash: out.txHash || "",
+      });
+      addKnownElectionAddress(addr);
+
       setVoteMsg(`✅ Vote relayed privately!\nTx:\n${out.txHash}\n\nReceipt:\n${receipt}`);
       await load();
     } catch (e) {
@@ -223,60 +236,90 @@ export default function VotePage() {
   }
 
   return (
-    <div className="page">
-      <h1>Cast Ballot</h1>
-
-      <section className="card">
-        <label className="field">
-          <span>
+    <div className="page vote-page">
+      <div className="vote-head-row">
+        <h1>Cast Ballot</h1>
+        <div className="vote-mode-inline">
+          <span className="vote-mode-chip">
+            {useLocal ? "Local signer" : "MetaMask signer"}
+          </span>
+          <label className="admin-switch admin-switch-compact" title="Toggle signer mode">
             <input
               type="checkbox"
+              className="admin-switch-input"
+              data-testid="vote-use-local-toggle"
               checked={useLocal}
               onChange={(e) => setUseLocal(e.target.checked)}
-              style={{ marginRight: 8 }}
             />
-            Use Local Hardhat signer (unchecked = MetaMask)
-          </span>
-        </label>
+            <span className="admin-switch-track" aria-hidden="true">
+              <span className="admin-switch-thumb" />
+            </span>
+          </label>
+        </div>
+      </div>
 
-        {useLocal && (
-          <>
-            <p className="hint">
-              ⚠️ Dev-only: pasting a private key in the browser is insecure. Use
-              MetaMask in production.
-            </p>
-            <label className="field">
-              <span>Private Key</span>
-              <input
-                type="password"
-                className="input"
-                placeholder="0x…"
-                value={pk}
-                onChange={(e) => setPk(e.target.value)}
-              />
-            </label>
-          </>
-        )}
-      </section>
+      {useLocal && (
+        <section className="card vote-local-key-card">
+          <p className="hint">
+            Dev mode only. Avoid using real private keys in browser input.
+          </p>
+          <label className="field">
+            <span>Private Key</span>
+            <input
+              type="password"
+              className="input"
+              placeholder="0x…"
+              value={pk}
+              onChange={(e) => setPk(e.target.value)}
+            />
+          </label>
+        </section>
+      )}
 
-      <section className="card">
+      <section className="card vote-info-card">
+        <div className="kv">
+          <b>Title:</b> {title || "—"}
+        </div>
         <div className="kv">
           <b>Contract:</b> <span className="mono">{addr}</span>
         </div>
         <div className="kv">
-          <b>Status:</b> {status || "—"}
+          <b>Status:</b>{" "}
+          <span
+            className={`home-status home-status-${
+              status?.toLowerCase() === "open" ||
+              status?.toLowerCase() === "pending" ||
+              status?.toLowerCase() === "closed"
+                ? status.toLowerCase()
+                : "unknown"
+            }`}
+          >
+            {status || "UNKNOWN"}
+          </span>
         </div>
         <div className="kv">
-          <b>Candidates:</b> {candidates.length ? candidates.join(", ") : "—"}
+          <b>Candidates:</b> {candidates.length ? candidates.length : "—"}
         </div>
-        <div className="actions">
+        <div className="kv">
+          <b>Window:</b> {fmt(startTs)} to {fmt(endTs)}
+        </div>
+        <div className="actions actions-mobile-grid">
           <Link className="btn link" to={`/election/${addr}`}>
+            <span className="btn-icon"><UiIcon name="back" /></span>
             Back to Election
+          </Link>
+          <Link className="btn link" to={`/election/${addr}/link`}>
+            <span className="btn-icon"><UiIcon name="link" /></span>
+            Link Identity
+          </Link>
+          <Link className="btn link" to={`/election/${addr}/tally`}>
+            <span className="btn-icon"><UiIcon name="tally" /></span>
+            Live Tally
           </Link>
         </div>
       </section>
 
-      <section className="card">
+      <section className="card vote-cast-card">
         <label className="field">
           <span>Candidate</span>
           <select
@@ -292,13 +335,16 @@ export default function VotePage() {
           </select>
         </label>
 
-        <button className="btn" onClick={castVote} disabled={!canVote || busy}>
-          {busy ? "Working…" : canVote ? "Cast Vote" : "Voting Closed"}
-        </button>
+        <div className="actions actions-mobile-grid">
+          <button className="btn" onClick={castVote} disabled={!canVote || busy}>
+            <span className={`btn-icon ${busy ? "is-spinning" : ""}`}>
+              <UiIcon name={busy ? "refresh" : "vote"} />
+            </span>
+            {busy ? "Working…" : canVote ? "Cast Vote" : "Voting Closed"}
+          </button>
+        </div>
 
-        <pre className="hint" style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
-          {voteMsg}
-        </pre>
+        <pre className="hint pre vote-msg-box">{voteMsg || "Ready."}</pre>
       </section>
     </div>
   );

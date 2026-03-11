@@ -4,7 +4,11 @@ import { useParams } from "react-router-dom";
 import { ethers } from "ethers";
 
 import VotingArtifact from "../Voting.json";
+import UiIcon from "../components/UiIcon";
 import { txLink, addressLink } from "../lib/explorer";
+import "../App.css";
+
+const DEFAULT_PAGE_SIZE = 25;
 
 export default function WatchDogPage({ provider, chainId, providerError }) {
   const { addr } = useParams();
@@ -14,20 +18,29 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const iface = useMemo(() => new ethers.Interface(VotingArtifact.abi), []);
 
   // Auto-fill contract address from /watchdog/:addr
   useEffect(() => {
-    if (addr && ethers.isAddress(addr)) {
-      setContractAddress(addr);
+    const normalized = firstAddress(addr || "");
+    if (normalized) {
+      setContractAddress(normalized);
       setError("");
     }
   }, [addr]);
 
+  const normalizedContract = useMemo(
+    () => firstAddress(contractAddress),
+    [contractAddress]
+  );
+
   async function loadEvents({ forceFromBlock } = {}) {
     setError("");
     setRows([]);
+    setPage(1);
     setLoading(true);
 
     try {
@@ -39,10 +52,11 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
         setError("No provider connected. (No MetaMask and no RPC fallback)");
         return;
       }
-      if (!ethers.isAddress(contractAddress)) {
+      if (!normalizedContract) {
         setError("Enter a valid Voting contract address.");
         return;
       }
+      setContractAddress(normalizedContract);
 
       const latest = await provider.getBlockNumber();
 
@@ -62,7 +76,7 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
       }
 
       const logs = await provider.getLogs({
-        address: contractAddress,
+        address: normalizedContract,
         fromBlock: startBlock,
         toBlock: latest,
       });
@@ -90,6 +104,7 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
         parsed.push({
           time: ts ? ts.toLocaleString() : `Block ${log.blockNumber}`,
           blockNumber: log.blockNumber,
+          logIndex: Number(log.index ?? 0),
           event: ev.name,
           args: ev.args,
           txHash: log.transactionHash,
@@ -97,7 +112,10 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
       }
 
       // newest first
-      parsed.sort((a, b) => b.blockNumber - a.blockNumber);
+      parsed.sort((a, b) => {
+        if (b.blockNumber !== a.blockNumber) return b.blockNumber - a.blockNumber;
+        return b.logIndex - a.logIndex;
+      });
       setRows(parsed);
 
       if (parsed.length === 0) {
@@ -111,21 +129,29 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
     }
   }
 
-  const contractExplorer = ethers.isAddress(contractAddress)
-    ? addressLink(chainId, contractAddress)
+  const contractExplorer = normalizedContract
+    ? addressLink(chainId, normalizedContract)
     : null;
 
+  const displayRows = useMemo(() => makeDisplayRows(rows), [rows]);
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return displayRows.slice(start, start + pageSize);
+  }, [displayRows, pageSize, safePage]);
+
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui" }}>
+    <div className="watchdog-page">
       <h2 style={{ marginBottom: 6 }}>Watchdog Audit Trail</h2>
 
-      <div style={{ marginBottom: 12, color: "#555", fontSize: 14 }}>
+      <div className="watchdog-meta">
         <div>
           Provider:{" "}
           {provider ? (
-            <span style={{ color: "#166534" }}>connected</span>
+            <span className="home-status home-status-open">connected</span>
           ) : (
-            <span style={{ color: "#b91c1c" }}>not connected</span>
+            <span className="home-status home-status-closed">not connected</span>
           )}
           {typeof chainId === "number" && (
             <span> • chainId: {chainId}</span>
@@ -142,128 +168,274 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
         )}
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 10,
-        }}
-      >
+      <div className="watchdog-row">
         <input
           value={contractAddress}
-          onChange={(e) => setContractAddress(e.target.value.trim())}
+          onChange={(e) => setContractAddress(e.target.value)}
           placeholder="Voting contract address (0x...)"
-          style={{ width: 460, padding: 10, borderRadius: 8, border: "1px solid #d1d5db" }}
+          className="watchdog-input watchdog-input-address"
         />
 
         <input
           value={fromBlock}
           onChange={(e) => setFromBlock(e.target.value.trim())}
           placeholder="fromBlock (optional)"
-          style={{ width: 180, padding: 10, borderRadius: 8, border: "1px solid #d1d5db" }}
+          className="watchdog-input watchdog-input-block"
         />
 
         <button
           onClick={() => loadEvents()}
           disabled={loading}
-          style={btn}
+          className="btn"
         >
+          <span className={`btn-icon ${loading ? "is-spinning" : ""}`}>
+            <UiIcon name={loading ? "refresh" : "load"} />
+          </span>
           {loading ? "Loading..." : "Load"}
         </button>
 
         <button
           onClick={() => loadEvents({ forceFromBlock: 0 })}
           disabled={loading}
-          style={btn}
+          className="btn"
           title="Useful if you don't know what block your deployment started at"
         >
+          <span className={`btn-icon ${loading ? "is-spinning" : ""}`}>
+            <UiIcon name={loading ? "refresh" : "load"} />
+          </span>
           Load from 0
         </button>
 
         <button
           onClick={() => {
             setRows([]);
+            setPage(1);
             setError("");
           }}
           disabled={loading}
-          style={btn}
+          className="btn"
         >
+          <span className="btn-icon">
+            <UiIcon name="clear" />
+          </span>
           Clear
         </button>
       </div>
 
       {providerError && (
-        <div style={{ marginTop: 8, color: "#b91c1c" }}>
+        <div className="watchdog-error">
           ❌ {providerError}
         </div>
       )}
 
       {error && (
-        <div style={{ marginTop: 8, color: "#b91c1c" }}>
+        <div className="watchdog-error">
           ❌ {error}
         </div>
       )}
 
       <div style={{ marginTop: 12 }}>
         {rows.length === 0 ? (
-          <div style={{ color: "#555" }}>
+          <div className="watchdog-empty">
             <p style={{ margin: 0 }}>No events yet.</p>
             <p style={{ marginTop: 6, fontSize: 13 }}>
               If you *expect* events: try <b>Load from 0</b>, double-check the contract address, and confirm your contract emits events.
             </p>
           </div>
         ) : (
-          <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
-            <thead>
-              <tr>
-                <th align="left">Time</th>
-                <th align="left">Event</th>
-                <th align="left">Details</th>
-                <th align="left">Tx</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, idx) => {
-                const link = txLink(chainId, r.txHash);
-                return (
-                  <tr key={idx}>
-                    <td>{r.time}</td>
-                    <td>{r.event}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {formatArgs(r.args)}
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {link ? (
-                        <a href={link} target="_blank" rel="noreferrer">
-                          {shortHash(r.txHash)}
-                        </a>
-                      ) : (
-                        shortHash(r.txHash)
-                      )}
-                    </td>
+          <>
+            <div className="watchdog-toolbar">
+              <div className="watchdog-summary">
+                Showing {pageRows.length} of {displayRows.length} rows ({rows.length} events)
+              </div>
+              <div className="watchdog-toolbar-controls">
+                <label className="watchdog-page-size">
+                  Per page
+                  <select
+                    className="watchdog-input"
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="watchdog-table-wrap">
+              <table className="watchdog-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Event</th>
+                    <th>Details</th>
+                    <th>Tx</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {pageRows.map((r, idx) => {
+                    if (r.kind === "voter-group") {
+                      const link = txLink(chainId, r.txHash);
+                      return (
+                        <tr key={r.key}>
+                          <td data-label="Time">{r.time}</td>
+                          <td data-label="Event">VoterRegistered × {r.entries.length}</td>
+                          <td data-label="Details" className="watchdog-mono">
+                            <details className="watchdog-group-details">
+                              <summary>Show voters</summary>
+                              <div className="watchdog-group-list">
+                                {r.entries.map((entry, entryIdx) => (
+                                  <div
+                                    className="watchdog-group-item"
+                                    key={`${entry.txHash}-${entry.blockNumber}-${entry.logIndex}`}
+                                  >
+                                    <span className="watchdog-group-index">{entryIdx + 1}.</span>
+                                    <span>{voterAddressFromArgs(entry.args)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          </td>
+                          <td data-label="Tx" className="watchdog-mono">
+                            {link ? (
+                              <a href={link} target="_blank" rel="noreferrer">
+                                {shortHash(r.txHash)}
+                              </a>
+                            ) : (
+                              shortHash(r.txHash)
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const link = txLink(chainId, r.txHash);
+                    return (
+                      <tr key={`${r.txHash}-${r.blockNumber}-${idx}`}>
+                        <td data-label="Time">{r.time}</td>
+                        <td data-label="Event">{r.event}</td>
+                        <td data-label="Details" className="watchdog-mono">
+                          {formatArgs(r.args)}
+                        </td>
+                        <td data-label="Tx" className="watchdog-mono">
+                          {link ? (
+                            <a href={link} target="_blank" rel="noreferrer">
+                              {shortHash(r.txHash)}
+                            </a>
+                          ) : (
+                            shortHash(r.txHash)
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="watchdog-pagination">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+              >
+                <span className="btn-icon"><UiIcon name="prev" /></span>
+                Prev
+              </button>
+              <span>
+                Page {safePage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+              >
+                <span className="btn-icon"><UiIcon name="next" /></span>
+                Next
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-const btn = {
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  background: "#f9fafb",
-  cursor: "pointer",
-};
-
 function shortHash(h) {
   return h ? `${h.slice(0, 10)}…${h.slice(-8)}` : "";
+}
+
+function voterAddressFromArgs(args) {
+  if (!args) return "";
+  const raw =
+    typeof args?.voter === "string"
+      ? args.voter
+      : typeof args?.[0] === "string"
+        ? args[0]
+        : "";
+  if (!raw) return "";
+  try {
+    return ethers.getAddress(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+function firstAddress(input) {
+  if (typeof input !== "string") return "";
+  const m = input.match(/0x[a-fA-F0-9]{40}\b/);
+  if (!m) return "";
+  try {
+    return ethers.getAddress(m[0]);
+  } catch {
+    return "";
+  }
+}
+
+function makeDisplayRows(rows) {
+  const out = [];
+
+  for (let i = 0; i < rows.length; ) {
+    const row = rows[i];
+    if (row.event !== "VoterRegistered") {
+      out.push(row);
+      i += 1;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < rows.length) {
+      const next = rows[j];
+      if (next.event !== "VoterRegistered") break;
+      if (next.txHash !== row.txHash) break;
+      j += 1;
+    }
+
+    const group = rows.slice(i, j);
+    if (group.length === 1) {
+      out.push(row);
+    } else {
+      out.push({
+        kind: "voter-group",
+        key: `voter-group-${row.txHash}-${row.blockNumber}-${row.logIndex}-${group.length}`,
+        time: row.time,
+        txHash: row.txHash,
+        entries: group,
+      });
+    }
+
+    i = j;
+  }
+
+  return out;
 }
 
 function formatArgs(args) {

@@ -9,6 +9,7 @@ A simple on-chain e-voting MVP built with **Hardhat** (contracts, scripts) and a
 ## Table of Contents
 
 - [Overview](#overview)
+- [What Changed In `ui-changes`](#what-changed-in-ui-changes)
 - [Hosted Demo (Sepolia)](#hosted-demo-sepolia)
 - [Requirements](#requirements)
 - [Project Layout](#project-layout)
@@ -35,6 +36,23 @@ This MVP demonstrates a minimal, auditable, privacy-improved vote flow:
 - Voter casts a gasless vote through a relayer using a Semaphore zero-knowledge proof.
 - A **receipt hash** is returned for each vote; voters can verify inclusion without exposing wallet-to-choice linkage.
 - **Live tally** is public and updates on each valid vote; voting blocks when the window closes.
+
+### What Changed In `ui-changes`
+
+- Top navigation + responsive layout across Home/Admin/Watchdog/Election routes.
+- Theme support (including dark mode) with consistent component styling.
+- Home page now lists discovered elections from the relayer registry with pagination.
+- Admin page now has dedicated tabs:
+  - `Create Election`
+  - `Manage Existing`
+  - `My Elections`
+- Admin create/manage voter inputs now support CSV import (`address` column or raw address text).
+- Watchdog table now has pagination and improved mobile behavior.
+- Added standalone pages for:
+  - `Link Identity`
+  - `Cast Ballot`
+  - `Check Receipt`
+  - `Live Tally` (TV-style view)
 
 ---
 
@@ -147,22 +165,22 @@ Vite will then load `.env.sepolia` (and `.env.sepolia.local` if present) instead
 
 Open the URL printed by Vite (usually `http://localhost:5173`).
 
-### 3) Start the relayer (Gasless ZK voting)
+### 4) Start the relayer (Gasless ZK voting)
 Open a new **Terminal C**
 
 1. Create a relayer env file at:
 
-`evote-ui/relayer/.env.sepolia`
+`evote-ui/relayer/.env.local`
 example:
 ```bash
 RELAYER_PORT=8787
-RELAYER_RPC_URL=https://sepolia.infura.io/v3/<YOUR_INFURA_KEY>
+RELAYER_RPC_URL=http://127.0.0.1:8545
 RELAYER_PRIVATE_KEY=0x<RELAYER_FUNDED_PRIVATE_KEY>
 ```
 2. Start the relayer:
 ```bash
 cd evote-ui/relayer
-node -r dotenv/config server.cjs dotenv_config_path=.env.sepolia
+node -r dotenv/config server.cjs dotenv_config_path=.env.local
 ```
 
 You should see logs like:
@@ -172,35 +190,36 @@ You should see logs like:
 
 
 
-### 4) Admin Panel — Local mode
+### 5) Admin Panel — Local mode
 
 1. Open **Admin Panel** in the UI: `http://localhost:5173/admin`.
 2. Enable **Use Local Hardhat signer**.
 3. In **Admin Private Key**, paste **Account #0** private key from the Hardhat node output (this will be your admin signer).
-4. Fill in:
+4. In the `Create Election` tab, fill in:
    - **Title** (e.g., `Vancouver Mayor 2026`)
-   - **Candidates** (comma-separated, e.g., `Alice, Bob, Charlie`)
+   - **Candidates** (separate candidate rows; add/remove as needed)
    - **Start / End** (pick a near-future start and a later end)
-   - **Eligible Voter Addresses**: paste the 20 **addresses** printed by Hardhat (the textarea auto-extracts addresses).
+   - **Eligible Voter Addresses**: paste addresses or import CSV.
 5. Enter **Relayer Address** (required).
 6. Leave **Semaphore Address** empty to auto-deploy Poseidon + SemaphoreVerifier + Semaphore (or paste an existing deployed Semaphore address).
 7. Click **Deploy & Register**.
-8. Copy the **new contract address** it prints. If your `.env.local` had an empty `VITE_CONTRACT_ADDRESS`, paste it now and restart `pnpm dev`.
+8. Copy the **new contract address** it prints.
+9. In `Manage Existing`, attach any election to:
+   - update window (before start),
+   - register additional voters (before start),
+   - update relayer,
+   - close early.
 
-### 5) Voter View — Cast & Verify
+### 6) Voter View — Link, Cast & Verify
 
 1. On the root page (`/`), paste the contract address and open the election.
-2. Confirm **Status: OPEN**.
-3. Use any **registered voter** private key (e.g., Account #1 from Hardhat output).
-4. Select a candidate by name.
-5. Click **Cast Vote**:
-   - First vote will auto-run one-time identity linking.
-   - Browser generates ZK proof and sends it to relayer.
-   - Relayer submits the on-chain vote transaction.
-6. The UI returns a **receipt hash**. Save it.
-7. Try to vote again with the same account/identity → you should see `can't vote twice` (by design).
-8. Use the **Check Receipt** page to verify inclusion (returns true/false).
-9. After the end time passes, the status becomes **CLOSED** and voting is blocked.
+2. During **PENDING**, open **Link Identity** and complete one-time identity linking.
+3. Once status is **OPEN**, open **Cast Ballot**, choose a candidate, and submit.
+4. The UI returns a **receipt hash**. Save it.
+5. Try to vote again with the same account/identity -> you should see `can't vote twice`.
+6. Use **Check Receipt** to verify on-chain inclusion.
+7. Use **Live Tally** for a dedicated full-screen tally page.
+8. After end time (or `closeEarly`), status becomes **CLOSED** and voting is blocked.
 
 > **On Sepolia with MetaMask:**  
 > When running against Sepolia (either via the hosted UI or `pnpm dev --mode sepolia`), leave any “Use Local Hardhat signer” option **unchecked**. The app uses MetaMask for identity/link signatures, while the relayer pays gas for on-chain `linkIdentity(...)` and `vote(...)`.
@@ -539,69 +558,54 @@ npx hardhat test --grep "closeEarly"
 
 ## Playwright (End-to-End UI Tests)
 
-This suite drives the real web UI against a local Hardhat node to prove the full flow end-to-end.
+`UITesting/` covers the local ZK flow end-to-end against your running Hardhat node + relayer.
 
-### What the tests cover
+### Current suite coverage
 
-1. **Deploy & Register (Admin panel)**
-
-   - Toggles local signer → fills title/candidates → sets start/end → pastes allowlist → Deploy & Register.
-   - Captures and validates the contract address.
-
-2. **Open Election (Voter view)**
-
-   - Opens `/` → pastes address → Open Election → waits until `Status: OPEN` (helper `waitForStatus()` taps **Refresh** while the page auto-updates).
-
-3. **Cast One Vote (receipt + tally)**
-
-   - Navigates to **Cast Ballot** → fills voter private key (local mode) → picks candidate → **Cast Vote**.
-   - Extracts receipt hash, verifies inclusion on **Check Receipt**, then confirms tally shows the vote.
-
-4. **Double-Vote Negative**
-
-   - Attempts a second vote from the same identity → expects `can't vote twice`.
-
-5. **Close (CLOSED)**
-   - Admin attaches the existing contract → **End Election Now**.
-   - Election page shows `Status: CLOSED`; tally remains visible/final.
-
-### Helper functions in the test
-
-- `toLocalInputString()` – formats `<input type="datetime-local">` values.
-- `waitForStatus(page, "OPEN" | "CLOSED")` – polls the Status row and taps **Refresh** until it matches.
+- Deploy election + initial registration.
+- Register additional voters from `Manage Existing`.
+- Link identity during `PENDING`.
+- Update window to open soon.
+- Cast vote + verify receipt + tally update.
+- Confirm double-vote rejection.
+- Close early.
+- Validate watchdog event visibility + pagination controls.
 
 ### Pre-run checklist
 
-- Hardhat node is running (`npx hardhat node`, keep it open).
-- UI dev server is running (Vite, usually at `http://localhost:5173`).
-- UI Admin panel supports “Use Local Hardhat signer”.
-- Your Playwright config’s `baseURL` points to the UI dev server (e.g., `http://localhost:5173`).
+- Hardhat node is running on `127.0.0.1:8545`.
+- Relayer is running on `localhost:8787`.
+- UI dev server is reachable at `http://127.0.0.1:5173` (Playwright starts it by default unless already running).
 
-### Install & run
+### Commands
 
 ```bash
-# from Playwright project root (UITesting/)
-pnpm exec playwright install
+cd UITesting
 
-# run just this E2E file
-TEST_SEED=1 pnpm exec playwright test tests/election.e2e.spec.js
+# list tests
+pnpm test:list
 
-# show HTML report after a run
+# full local election suite
+pnpm test:e2e
+
+# deploy/register smoke test
+pnpm test:smoke
+
+# html report
 pnpm exec playwright show-report
 ```
 
-### Debugging tips
+### Debugging
 
 ```bash
-# Open Playwright Inspector (headed, pausing at each action)
-PWDEBUG=1 TEST_SEED=1 pnpm exec playwright test tests/election.e2e.spec.js
+# focused debug for the update window path
+pnpm exec playwright test tests/election.e2e.spec.js -g "Manage: update window to open soon" --debug
 ```
 
-**Notes**
+### Notes
 
-- If Status doesn’t flip as expected during demos, keep **Refresh** visible: the helper `waitForStatus()` will keep tapping it while the page’s own auto-update detects the start/end time.
-- Ensure date/time fields are valid local times; the helper `toLocalInputString()` formats them correctly.
-- If you change any button/label text in the UI, update the test locators to match (they use accessible names like “Open Election”, “Cast Vote”, “End Election Now”).
+- Tests force local signer mode (`admin.useLocal` / `vote.useLocal`) to avoid flaky toggle behavior.
+- If the app is changed to new labels/selectors, update test locators in `UITesting/tests/*.spec.js`.
 
 ---
 

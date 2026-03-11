@@ -1,59 +1,94 @@
-import { test, expect } from '@playwright/test';
-import { pickRandomParticipants } from './utils/accounts.js';
+import { test, expect } from "@playwright/test";
+import { pickRandomParticipants } from "./utils/accounts.js";
 
-test('admin can deploy election and register voters', async ({ page }) => {
-  // pick random admin + 4 voters (deterministic if TEST_SEED is set)
+const LOCAL_RPC_URL = process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545";
+const RELAYER_URL = process.env.RELAYER_URL || "http://localhost:8787";
+const FORCED_SEMAPHORE = process.env.PLAYWRIGHT_SEMAPHORE_ADDRESS || "";
+let relayerAddress = "";
+let reusableSemaphore = "";
+
+function toLocalInputString(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+test("admin can deploy election and register voters (local)", async ({ page }) => {
+  test.setTimeout(2 * 60_000);
   const { admin, voters } = pickRandomParticipants({ votersCount: 4 });
-  console.log(`Using admin: ${admin.address}`);
 
-  // go to admin panel
-  await page.goto('/admin');
+  await page.goto("/admin");
+  await page.evaluate(() => {
+    localStorage.setItem("admin.useLocal", "1");
+  });
+  await page.reload();
 
-  // 1 Enable local Hardhat signer
-  const localToggle = page.getByLabel('Use Local Hardhat signer');
-  if (!(await localToggle.isChecked())) {
-    await localToggle.check();
+  const localToggle = page.getByTestId("admin-use-local-toggle");
+  for (let i = 0; i < 3; i++) {
+    if (await localToggle.isChecked()) break;
+    try {
+      await localToggle.setChecked(true, { force: true, timeout: 3000 });
+    } catch {
+      await page.locator(".admin-switch-track").first().click({ force: true });
+    }
+    await page.waitForTimeout(250);
   }
+  await expect(localToggle).toBeChecked({ timeout: 5000 });
+  const keyField = page.getByTestId("admin-private-key");
+  await expect(keyField).toBeVisible({ timeout: 5000 });
+  await keyField.fill(admin.privateKey);
 
-  // 2 Fill admin private key
-  await page.getByLabel('Admin Private Key (dev only)').fill(admin.privateKey);
+  await page.getByTestId("tab-create").click();
+  await page.getByTestId("create-title").fill("Admin Deploy Smoke - E2E");
+  await page.getByTestId("create-candidate-0").fill("Alice");
+  await page.getByTestId("create-candidate-1").fill("Bob");
 
-  // 3 Switch to "Create Election" tab (just in case default tab is 'manage')
-  await page.getByRole('button', { name: 'Create Election' }).click();
+  const now = Date.now();
+  await page.getByTestId("create-start").fill(toLocalInputString(new Date(now + 2 * 60_000)));
+  await page.getByTestId("create-end").fill(toLocalInputString(new Date(now + 10 * 60_000)));
+  await page.getByLabel("Relayer Address").fill(relayerAddress);
+  if (reusableSemaphore) {
+    await page
+      .getByLabel("Semaphore Address (optional, auto-deploy if empty)")
+      .fill(reusableSemaphore);
+  }
+  await page.getByTestId("create-voters").fill(voters.map((v) => v.address).join("\n"));
 
-  // 4 Fill out election details
-  await page.getByLabel('Title').fill('Vancouver Mayor 2026 - E2E');
-  await page.getByLabel('Candidates (comma-separated)').fill('Alice,Bob,Charlie');
+  await page.getByTestId("create-deploy-register").click();
+  await expect(page.getByTestId("create-message")).not.toHaveText(/^\s*$/, { timeout: 15_000 });
 
-  // 5 Fill start/end times
-  const now = new Date();
-  const start = new Date(now.getTime() + 2 * 60 * 1000).toISOString().slice(0, 16); // 2 min later
-  const end = new Date(now.getTime() + 10 * 60 * 1000).toISOString().slice(0, 16);  // +10 min
-  await page.getByLabel('Start (local)').fill(start);
-  await page.getByLabel('End (local)').fill(end);
-
-  // 6 Fill eligible voters (newline-separated addresses)
-  const voterList = voters.map(v => v.address).join('\n');
-  await page
-    .getByLabel('Eligible Voter Addresses (paste; only addresses are used)')
-    .fill(voterList);
-
-  // 7 Deploy & Register
-  const deployBtn = page.getByRole('button', { name: 'Deploy & Register' });
-  await expect(deployBtn).toBeEnabled();
-  await deployBtn.click();
-
-  // 8 Wait for contract address confirmation
-  const contractLine = page.locator('b:has-text("Contract:") + span.mono');
-  await expect(contractLine).toBeVisible({ timeout: 30_000 });
+  const contractLine = page.getByTestId("create-contract-address");
+  await expect(contractLine).toBeVisible({ timeout: 120_000 });
 
   const contractAddress = (await contractLine.textContent())?.trim();
-  console.log('✅ Deployed contract:', contractAddress);
-
-  // Sanity check: should look like an Ethereum address
   expect(contractAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+  await expect(page.getByTestId("create-message")).toContainText(/deployed|registered|✅/i, {
+    timeout: 120_000,
+  });
+});
 
-  // Optional: verify success message in .hint
-  const hint = await page.locator('.hint.pre').textContent();
-  expect(hint || '').toMatch(/success|deployed|registered/i);
+test.beforeAll(async ({ request }) => {
+  const rpc = await request.post(LOCAL_RPC_URL, {
+    timeout: 10_000,
+    data: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_chainId",
+      params: [],
+    },
+  });
+  expect(rpc.ok(), `Local RPC not reachable at ${LOCAL_RPC_URL}`).toBeTruthy();
+
+  const health = await request.get(`${RELAYER_URL}/health`, { timeout: 10_000 });
+  expect(health.ok(), `Relayer not reachable at ${RELAYER_URL}`).toBeTruthy();
+  const body = await health.json();
+  expect(body?.relayer, "Relayer health response missing relayer address").toMatch(
+    /^0x[a-fA-F0-9]{40}$/
+  );
+  relayerAddress = body.relayer;
+
+  if (/^0x[a-fA-F0-9]{40}$/.test(FORCED_SEMAPHORE)) {
+    reusableSemaphore = FORCED_SEMAPHORE;
+  }
 });
