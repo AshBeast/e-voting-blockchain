@@ -152,6 +152,7 @@ contract Voting {
         uint256 expiry,
         bytes calldata signature
     ) external onlyRelayer {
+        require(block.timestamp < startTs, "linking closed");
         require(block.timestamp <= expiry, "link expired");
         require(registered[voter], "not registered");
         require(!hasLinkedIdentity[voter], "identity linked");

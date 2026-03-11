@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
+import UiIcon from "../components/UiIcon";
 import "../App.css";
 
 
@@ -15,6 +16,10 @@ const ABI = [
   "function status() view returns (string memory)",
   "function electionInfo() view returns (string memory,uint64,uint64)",
 ];
+
+function errMsg(e) {
+  return e?.reason || e?.shortMessage || e?.message || String(e);
+}
 
 export default function ElectionPage() {
   const { addr } = useParams();
@@ -29,6 +34,8 @@ export default function ElectionPage() {
   const [status, setStatus] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [tally, setTally] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState("");
 
   // guard + provider
   useEffect(() => {
@@ -94,11 +101,26 @@ async function load() {
   setTally(tl.map((x) => x.toString()));
 }
 
+  async function refreshNow() {
+    if (!contract || refreshing) return;
+    setRefreshing(true);
+    setRefreshMsg("");
+    try {
+      await load();
+    } catch (e) {
+      setRefreshMsg(`❌ ${errMsg(e)}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   // auto-refresh
   useEffect(() => {
     if (!contract) return;
-    load();
-    const id = setInterval(load, 4000);
+    load().catch(() => {});
+    const id = setInterval(() => {
+      load().catch(() => {});
+    }, 4000);
     return () => clearInterval(id);
   }, [contract]);
 
@@ -113,10 +135,26 @@ async function load() {
       : "—";
 
   const canVote = useMemo(() => status === "OPEN", [status]);
+  const canLink = useMemo(() => status === "PENDING", [status]);
+  const totalVotes = useMemo(
+    () => tally.reduce((acc, x) => acc + Number(x || 0), 0),
+    [tally]
+  );
+  const leader = useMemo(() => {
+    if (!candidates.length) return null;
+    let best = { name: candidates[0], votes: Number(tally[0] || 0) };
+    for (let i = 1; i < candidates.length; i++) {
+      const votes = Number(tally[i] || 0);
+      if (votes > best.votes) {
+        best = { name: candidates[i], votes };
+      }
+    }
+    return best;
+  }, [candidates, tally]);
 
   return (
     <div className="page">
-      <h1>🗳️Election</h1>
+      <h1>Election</h1>
 
       <section className="card">
         <div className="kv"><b>Contract:</b> <span className="mono">{addr}</span></div>
@@ -125,42 +163,77 @@ async function load() {
         <div className="kv"><b>Starts:</b> {fmt(startTs)}</div>
         <div className="kv"><b>Ends:</b> {fmt(endTs)}</div>
 
-        <div className="actions">
-          <button className="btn" onClick={load}>Refresh</button>
-          <button className="btn" onClick={() => navigate("/")}>Change Contract</button>
-          <Link className={`btn link ${!canVote ? "disabled" : ""}`} to={`/election/${addr}/vote`}>
-            Cast Ballot
+        <div className="actions election-actions actions-mobile-grid">
+          <button
+            type="button"
+            className="btn election-action-btn election-refresh-btn"
+            onClick={refreshNow}
+            disabled={refreshing}
+            aria-label="Refresh election data"
+            title="Refresh election data"
+          >
+            <span className={`btn-icon ${refreshing ? "is-spinning" : ""}`}>
+              <UiIcon name="refresh" />
+            </span>
+            <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
+          </button>
+          <button
+            type="button"
+            className="btn election-action-btn"
+            onClick={() => navigate("/")}
+          >
+            <span className="btn-icon">
+              <UiIcon name="switch" />
+            </span>
+            <span>Open Another Election</span>
+          </button>
+          <Link className="btn link election-action-btn" to={`/election/${addr}/tally`}>
+            <span className="btn-icon">
+              <UiIcon name="tally" />
+            </span>
+            <span>Live Tally Screen</span>
           </Link>
-          <Link className="btn link" to={`/election/${addr}/receipt`}>
-            Check Receipt
+          <Link
+            className={`btn link election-action-btn ${!canLink ? "disabled" : ""}`}
+            to={`/election/${addr}/link`}
+          >
+            <span className="btn-icon">
+              <UiIcon name="link" />
+            </span>
+            <span>Link Identity</span>
+          </Link>
+          <Link
+            className={`btn link election-action-btn ${!canVote ? "disabled" : ""}`}
+            to={`/election/${addr}/vote`}
+          >
+            <span className="btn-icon">
+              <UiIcon name="vote" />
+            </span>
+            <span>Cast Ballot</span>
+          </Link>
+          <Link className="btn link election-action-btn" to={`/election/${addr}/receipt`}>
+            <span className="btn-icon">
+              <UiIcon name="receipt" />
+            </span>
+            <span>Check Receipt</span>
           </Link>
         </div>
+        {refreshMsg && <div className="hint pre mt8">{refreshMsg}</div>}
       </section>
 
       <section className="card">
-        <h2>Live Tally</h2>
-        {candidates.length ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Candidate</th>
-                <th>Votes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map((name, i) => (
-                <tr key={i}>
-                  <td>{i}</td>
-                  <td>{name}</td>
-                  <td>{tally[i] ?? "0"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div>Loading…</div>
-        )}
+        <h2>Quick Overview</h2>
+        <div className="kv"><b>Total Votes:</b> {totalVotes}</div>
+        <div className="kv">
+          <b>Current Leader:</b>{" "}
+          {leader ? `${leader.name} (${leader.votes})` : "—"}
+        </div>
+        <div className="kv">
+          <b>Candidates:</b> {candidates.length ? candidates.join(", ") : "—"}
+        </div>
+        <div className="hint mt8">
+          Open the dedicated <b>Live Tally Screen</b> for TV display with charts and live updates.
+        </div>
       </section>
     </div>
   );

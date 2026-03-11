@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ethers } from "ethers";
+import UiIcon from "../components/UiIcon";
 
 const RPC = import.meta.env.VITE_RPC_URL || import.meta.env.VITE_LOCAL_RPC || "http://127.0.0.1:8545";
 
@@ -53,8 +54,11 @@ export default function ReceiptPage() {
 
       <section className="card">
         <div className="kv"><b>Contract:</b> <span className="mono">{addr}</span></div>
-        <div className="actions">
-          <Link className="btn link" to={`/election/${addr}`}>Back to Election</Link>
+        <div className="actions actions-mobile-grid">
+          <Link className="btn link" to={`/election/${addr}`}>
+            <span className="btn-icon"><UiIcon name="back" /></span>
+            Back to Election
+          </Link>
         </div>
       </section>
 
@@ -69,7 +73,12 @@ export default function ReceiptPage() {
             onChange={(e) => setReceiptInput(e.target.value)}
           />
         </label>
-        <button className="btn" onClick={checkReceipt}>Check</button>
+        <div className="actions actions-mobile-grid">
+          <button className="btn" onClick={checkReceipt}>
+            <span className="btn-icon"><UiIcon name="check" /></span>
+            Check Receipt
+          </button>
+        </div>
         <div className="hint" style={{ marginTop: 8 }}>{checkMsg}</div>
       </section>
     </div>

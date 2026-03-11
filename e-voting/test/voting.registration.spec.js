@@ -23,6 +23,23 @@ describe("Voting.sol – Registration", function () {
     );
   });
 
+  it("rejects identity linking after election start", async function () {
+    const { voting, votingAddr, start, relayer, v1 } = await loadFixture(
+      deployElectionFixture
+    );
+
+    await voting.registerVoters([v1.address]);
+    await openElection(start);
+
+    const commitment = makeIdentityCommitment(v1.address, votingAddr);
+    const expiry = start + 3600n;
+    const sig = await makeLinkSignature(voting, v1, commitment, expiry);
+
+    await expect(
+      voting.connect(relayer).linkIdentity(v1.address, commitment, expiry, sig)
+    ).to.be.revertedWith(REVERT.LINK_CLOSED);
+  });
+
   it("duplicate addresses in the same batch are idempotent", async function () {
     const { voting, votingAddr, start, relayer, v1 } = await loadFixture(
       deployElectionFixture

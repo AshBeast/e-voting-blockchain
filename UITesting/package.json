@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:list": "playwright test --list",
+    "test:smoke": "playwright test tests/admin-deploy.spec.js",
+    "test:e2e": "playwright test tests/election.e2e.spec.js"
   },
   "keywords": [],
   "author": "",

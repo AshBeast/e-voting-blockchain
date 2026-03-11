@@ -31,14 +31,23 @@ export function loadAccounts() {
  */
 export function pickRandomParticipants({ votersCount = 3, seed = process.env.TEST_SEED } = {}) {
   const accounts = loadAccounts();
-  const rng = seed ? seedRandom(seed) : Math.random;
+  const rng = seed ? seedRandom(seed) : (max = 1) => Math.random() * max;
+  if (!Array.isArray(accounts) || accounts.length < 2) {
+    throw new Error("Need at least 2 accounts in UITesting/fixtures/accounts.json");
+  }
   const adminIndex = Math.floor(rng(accounts.length));
   const admin = accounts[adminIndex];
 
   // pick unique random voters excluding admin
   const voters = [];
   const indices = new Set([adminIndex]);
-  while (voters.length < Math.min(votersCount, accounts.length - 1)) {
+  let guard = 0;
+  const needed = Math.min(votersCount, accounts.length - 1);
+  while (voters.length < needed) {
+    guard++;
+    if (guard > 10_000) {
+      throw new Error("Unable to pick unique voter accounts (selection loop guard hit).");
+    }
     const idx = Math.floor(rng(accounts.length));
     if (indices.has(idx)) continue;
     indices.add(idx);
