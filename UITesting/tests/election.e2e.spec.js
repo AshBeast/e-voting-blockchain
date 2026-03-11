@@ -40,7 +40,10 @@ async function waitForStatus(page, expected, { timeout = 90_000, interval = 1000
     if (txt.toUpperCase().includes(expected.toUpperCase())) return;
 
     const refreshBtn = page.getByRole("button", { name: /Refresh/i }).first();
-    if (await refreshBtn.isVisible().catch(() => false)) {
+    const canClickRefresh =
+      (await refreshBtn.isVisible().catch(() => false)) &&
+      (await refreshBtn.isEnabled().catch(() => false));
+    if (canClickRefresh) {
       await refreshBtn.click();
     }
     await page.waitForTimeout(interval);
