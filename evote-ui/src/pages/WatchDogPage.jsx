@@ -9,6 +9,14 @@ import { txLink, addressLink } from "../lib/explorer";
 import "../App.css";
 
 const DEFAULT_PAGE_SIZE = 25;
+const LEGACY_EVENT_ABI = [
+  "event VoteCast(address voter, bytes32 receipt)",
+  "event VoteCast(address indexed voter, bytes32 receipt)",
+  "event VoteCast(address indexed voter, bytes32 indexed receipt)",
+  "event VoterRegistered(address voter)",
+  "event ElectionConfigured(string title, uint64 startTs, uint64 endTs)",
+  "event RelayerUpdated(address relayer)",
+];
 
 export default function WatchDogPage({ provider, chainId, providerError }) {
   const { addr } = useParams();
@@ -22,6 +30,7 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const iface = useMemo(() => new ethers.Interface(VotingArtifact.abi), []);
+  const legacyIface = useMemo(() => new ethers.Interface(LEGACY_EVENT_ABI), []);
 
   // Auto-fill contract address from /watchdog/:addr
   useEffect(() => {
@@ -86,11 +95,19 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
 
       const parsed = [];
       for (const log of logs) {
-        let ev;
+        let ev = null;
         try {
           ev = iface.parseLog(log);
         } catch {
-          continue; // not one of our ABI events
+          // keep trying legacy decoder below
+        }
+
+        if (!ev) {
+          try {
+            ev = legacyIface.parseLog(log);
+          } catch {
+            // leave null; we'll display unknown below
+          }
         }
 
         let block = blockCache.get(log.blockNumber);
@@ -100,13 +117,22 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
         }
 
         const ts = block?.timestamp ? new Date(Number(block.timestamp) * 1000) : null;
+        const topic0 = Array.isArray(log.topics) ? log.topics[0] : "";
+        const unknownEventName = topic0
+          ? `Unknown(${String(topic0).slice(0, 10)}...)`
+          : "Unknown";
 
         parsed.push({
           time: ts ? ts.toLocaleString() : `Block ${log.blockNumber}`,
           blockNumber: log.blockNumber,
           logIndex: Number(log.index ?? 0),
-          event: ev.name,
-          args: ev.args,
+          event: ev?.name || unknownEventName,
+          args:
+            ev?.args ||
+            {
+              topic0,
+              data: log.data || "0x",
+            },
           txHash: log.transactionHash,
         });
       }
@@ -396,7 +422,11 @@ function firstAddress(input) {
   try {
     return ethers.getAddress(m[0]);
   } catch {
-    return "";
+    try {
+      return ethers.getAddress(m[0].toLowerCase());
+    } catch {
+      return "";
+    }
   }
 }
 
