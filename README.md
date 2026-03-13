@@ -22,6 +22,9 @@ A simple on-chain e-voting MVP built with **Hardhat** (contracts, scripts) and a
 - [HardHat Testing](#hardhat-testing)
 - [Playwright (End-to-End UI Tests)](#playwright-end-to-end-ui-tests)
 - [Milestone 1 — Completed Deliverables](#milestone-1--completed-deliverables)
+- [Milestone 2 — Completed Deliverables](#milestone-2--completed-deliverables)
+- [Milestone 3 — Completed Deliverables](#milestone-3--completed-deliverables)
+- [Milestone 4 — Completed Deliverables](#milestone-4--completed-deliverables)
 - [License](#license)
 
 ---
@@ -650,18 +653,27 @@ The same `Voting.sol` contract and React client now run on Sepolia, with MetaMas
 ## Milestone 3 — Completed Deliverables
 
 - Date: **January–February 2026**
-- Goal: Harden the system and add gasless private voting using a relayer + Semaphore zero-knowledge flow, while keeping the local demo flow fully testable end-to-end.
+- Goal: Harden the system and add gasless voting using an EIP-2771 forwarder + relayer, while keeping the local demo flow fully testable end-to-end.
 
 ### What was completed
 
-- **Semaphore ZK Voting Contract** — `Voting.sol` now links a one-time identity commitment per registered wallet and validates Semaphore proofs in `vote(optionIndex, proof, receipt)`.
-- **Gasless Relayer Flow** — relayer endpoints (`/zk-link`, `/zk-vote`) submit on-chain transactions and pay gas while keeping vote linkage private from wallet address.
-- **Tamper Binding** — proof message binds to `voteMessage(optionIndex, receipt)` so relayer cannot alter option index or receipt.
+- **Gasless Voting (EIP-2771)** — implemented OpenZeppelin `ERC2771Forwarder` (`Forwarder.sol`) plus a Node/Express relayer that accepts EIP-712 typed-data signatures, verifies the request (`verify()`), and submits `execute()` while paying gas.
+- **EIP-2771-Aware Voting Contract** — updated `Voting.sol` to use `_msgSender()` and accept a `trustedForwarder` in the constructor so votes are attributed to the voter (not the relayer).
+- **End-to-End Local Flow** — local Hardhat now supports both vote paths:
+  - **Direct vote** (local private key mode), and
+  - **Gasless vote** (MetaMask signs → relayer pays gas).
 - **Playwright E2E Coverage** — core election lifecycle tests pass end-to-end (deploy → register → vote → verify receipt → close).
 - **Admin Ops Exercised** — validated admin operations (`updateWindow`, `closeEarly`) through the UI and tests so elections can be adjusted or ended early.
 - **Audit Layer (Explorer Links)** — added UI affordances to support auditability (links to transactions/events on explorers) so observers can verify on-chain activity without manual log inspection.
 
-### ZK Migration Notes (What Changed)
+---
+
+## Milestone 4 — Completed Deliverables
+
+- Date: **March 2026**
+- Goal: Migrate privacy from forwarder-based gasless voting to Semaphore zero-knowledge voting, and clean up deprecated forwarder paths.
+
+### What was completed
 
 - Added:
   - `ISemaphore` integration, per-election Semaphore group, and `voteScope`.
