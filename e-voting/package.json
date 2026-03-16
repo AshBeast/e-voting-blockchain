@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "hardhat test",
+    "test:scale": "SCALE_BENCH=1 hardhat test test/voting.scale.spec.js",
     "compile": "hardhat compile",
     "clean": "hardhat clean",
     "snark:fetch": "node scripts/fetch-snark-artifacts.js"

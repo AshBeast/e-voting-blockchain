@@ -225,7 +225,7 @@ You should see logs like:
 8. After end time (or `closeEarly`), status becomes **CLOSED** and voting is blocked.
 
 > **On Sepolia with MetaMask:**  
-> When running against Sepolia (either via the hosted UI or `pnpm dev --mode sepolia`), leave any “Use Local Hardhat signer” option **unchecked**. The app uses MetaMask for identity/link signatures, while the relayer pays gas for on-chain `linkIdentity(...)` and `vote(...)`.
+> When running against Sepolia (either with the hosted UI or `pnpm dev --mode sepolia`), leave any “Use Local Hardhat signer” option **unchecked**. The app uses MetaMask for identity/link signatures, while the relayer pays gas for on-chain `linkIdentity(...)` and `vote(...)`.
 
 ---
 
@@ -245,7 +245,7 @@ Source: `contracts/Voting.sol`
 - `linkPayloadHash(address voter, uint256 identityCommitment, uint256 expiry) → bytes32`
 - `linkIdentity(address voter, uint256 identityCommitment, uint256 expiry, bytes signature)` — _onlyRelayer_
 
-### Voting (ZK, gasless via relayer)
+### Voting (ZK, gasless with relayer)
 
 - `voteMessage(uint256 optionIndex, bytes32 receipt) → uint256`
 - `vote(uint256 optionIndex, ISemaphore.SemaphoreProof proof, bytes32 receipt)` — _onlyRelayer + inWindow_
@@ -294,7 +294,7 @@ npx hardhat node
 
 ## Environment Variables
 
-The UI supports two main modes via Vite’s `--mode` flag:
+The UI supports two main modes with Vite’s `--mode` flag:
 
 - **Local dev (Hardhat)** – default mode, talks to `http://127.0.0.1:8545`
 - **Sepolia testnet** – `--mode sepolia`, talks to an Infura (or other) Sepolia RPC
@@ -389,25 +389,25 @@ If you want to run the UI locally but still talk to Sepolia:
 
 All diagrams live in `./screenshots/`. If they don’t render on GitHub, double-check the relative path from this README.
 
-### 1) Contract deployment & voter registration (admin flow)
+### 1) System overview
 
-![How to set up election](/screenshots/how%20to%20set%20up%20election-2025-10-12-000524.png)  
-_Admin deploys `Voting.sol`, network mines the creation tx, then admin registers the allowlist before `startTs`._
+![Ethereum Voting dApp Flow](screenshots/new%20diagrams/Ethereum%20Voting%20dApp%20Flow-2026-03-15-211945.png)  
+_High-level architecture showing admin setup, voter identity linking, gasless relaying, Semaphore proof validation, and observer audit paths._
 
-### 2) Voting flow (state-changing tx)
+### 2) Contract deployment & voter registration (admin flow)
 
-![How to vote](/screenshots/how%20to%20vote-2025-10-12-000519.png)  
-_Registered voter performs one-time link (if needed), browser generates a Semaphore proof, relayer submits `vote(optionIndex, proof, receipt)`, contract validates proof and increments tally._
+![How to set up election](screenshots/new%20diagrams/how%20to%20set%20up%20election-2026-03-15-213636.png)  
+_Admin deploys `Voting.sol`, optionally deploys or reuses the Semaphore stack, and registers the voter allowlist before `startTs`._
 
-### 3) Receipt verification (read-only `eth_call`)
+### 3) Identity linking (pending phase)
 
-![Receipt verification sequence](/screenshots/recipt%20check-2025-10-12-000504.png)  
-_UI calls `hasReceipt(receipt)` via `eth_call`; the node executes read-only and returns `true|false` (no tx/mining)._
+![Link Identity](screenshots/new%20diagrams/Link%20Identity-2026-03-15-214126.png)  
+_Registered voter derives a private Semaphore identity in the browser, signs a link authorization, and the relayer submits `linkIdentity(...)` before the election opens._
 
-### 4) Live tally & status reads
+### 4) Voting flow (open phase)
 
-![Live tally and status reads](/screenshots/live%20tally-2025-10-12-000508.png)  
-_Frontend periodically calls `status()`, `candidates()`, and `tally()` via `eth_call` to render live results._
+![Cast Vote](screenshots/new%20diagrams/Cast%20Vote-2026-03-15-214424.png)  
+_Linked voter generates a receipt and Semaphore proof, the relayer submits `vote(optionIndex, proof, receipt)`, and the contract validates the proof and updates the tally._
 
 ---
 
@@ -421,6 +421,31 @@ npx hardhat test
 ```
 
 You should see all suites pass with Mocha output grouped by feature.
+
+### Optional Scale Benchmarks
+
+For large-election benchmarking, there is a dedicated optional suite that is not meant for normal CI runs.
+
+```bash
+# 1,000 voter benchmark
+cd e-voting
+pnpm run test:scale
+
+# 10,000 voter benchmark
+SCALE_VOTERS=10000 SCALE_LINK_VOTERS=10000 SCALE_VOTE_VOTERS=10000 SCALE_BATCH_SIZE=250 pnpm run test:scale
+```
+
+What it measures:
+
+- large-allowlist registration gas and batch sizing,
+- `linkIdentity` scaling with the real local Semaphore contract,
+- high-volume vote throughput with the mock verifier,
+- one real-proof vote baseline so you can project 1,000 / 10,000 vote gas.
+
+Notes:
+
+- `vote` at very large scale is benchmarked with `MockSemaphore` for throughput; this isolates your contract path from JS proof generation cost.
+- The suite also prints a real single-vote proof baseline so you can estimate realistic election-level vote gas.
 
 ### Test Layout
 
@@ -635,7 +660,7 @@ pnpm exec playwright test tests/election.e2e.spec.js -g "Manage: update window t
 
 - **Testnet Deployment (Sepolia)** — extended the Hardhat configuration and environment files to support Sepolia, including RPC URL, chain ID, and a funded admin private key loaded from `.env.sepolia`.
 - **MetaMask Integration** — updated the Admin and Voter flows so that, when local mode is disabled, all transactions (deploy, register, vote) are signed through an injected wallet (MetaMask) instead of a pasted dev key.
-- **Environment Modes (`--mode`)** — configured Vite to switch between local Hardhat and Sepolia setups via `pnpm dev --mode sepolia`, using `.env.sepolia` for testnet RPC and contract address.
+- **Environment Modes (`--mode`)** — configured Vite to switch between local Hardhat and Sepolia setups with `pnpm dev --mode sepolia`, using `.env.sepolia` for testnet RPC and contract address.
 - **Hosted UI (evote.donkloud.ca)** — built and deployed the React frontend to a public server:
   - Voter View: `https://evote.donkloud.ca`
   - Admin Panel: `https://evote.donkloud.ca/admin`
@@ -688,7 +713,7 @@ The same `Voting.sol` contract and React client now run on Sepolia, with MetaMas
 
 ### ZK Migration Details (Behavioral Differences)
 
-- **Vote privacy improvement**: old flow exposed `voter + optionIndex` linkage directly (`VoteCast(voter, receipt)` plus clear calldata). New flow emits `VoteCast(receipt)` and validates anonymous membership via Semaphore proof.
+- **Vote privacy improvement**: old flow exposed `voter + optionIndex` linkage directly (`VoteCast(voter, receipt)` plus clear calldata). New flow uses `VoteCast(receipt)` and validates anonymous membership with Semaphore proof.
 - **One-time identity bootstrap**: each registered wallet links one commitment once per election, then votes privately with proof; this separates public wallet registration from private ballot casting.
 - **Relayer trust reduction**: relayer can submit txs and pay gas, but cannot silently change candidate choice because proof message is bound to `voteMessage(optionIndex, receipt)`.
 - **Duplicate vote handling**: old model relied on `hasVoted[address]`; new model relies on Semaphore nullifier uniqueness (same identity cannot produce two valid votes for the same scope).
