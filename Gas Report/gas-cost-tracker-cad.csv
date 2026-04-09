@@ -1,0 +1,22 @@
+Phase,Process,Method or Component,Gas Used,CAD @ Current Mainnet Std (0.109 gwei),CAD @ 1 gwei,CAD @ 5 gwei,CAD @ 15 gwei,CAD @ 30 gwei,Measurement Type,Source,Notes
+Deployment,Deploy Voting only (reuse existing Semaphore),Voting deployment,3455447,1.1091,10.1752,50.8758,152.6274,305.2548,avg deployment baseline,Hardhat gas reporter (2026-03-20),Use this when an existing Semaphore contract is reused.
+Deployment,Deploy PoseidonT3,PoseidonT3 deployment,5245573,1.6837,15.4465,77.2325,231.6975,463.3949,avg deployment baseline,Hardhat gas reporter (2026-03-20),Needed when auto-deploying the local Semaphore stack.
+Deployment,Deploy SemaphoreVerifier,SemaphoreVerifier deployment,3803803,1.2209,11.201,56.0048,168.0143,336.0287,avg deployment baseline,Hardhat gas reporter (2026-03-20),Verifier contract used by LocalSemaphore.
+Deployment,Deploy LocalSemaphore,LocalSemaphore deployment,2928782,0.94,8.6243,43.1215,129.3646,258.7292,avg deployment baseline,Hardhat gas reporter (2026-03-20),Real Semaphore wrapper used by the app and zk integration tests.
+Deployment,Deploy MockSemaphore (testing only),MockSemaphore deployment,1587626,0.5096,4.675,23.3752,70.1256,140.2512,avg deployment baseline,Hardhat gas reporter (2026-03-20),Testing helper only; not part of the real election flow.
+Deployment,Auto-deploy full Semaphore stack + Voting,PoseidonT3 + SemaphoreVerifier + LocalSemaphore + Voting,15433605,4.9537,45.4469,227.2346,681.7038,1363.4076,derived total,Derived from deployment baselines above,Useful admin-side estimate when the UI deploys everything from scratch.
+Admin,Register voters (small or normal call),registerVoters(address[]),65128,0.0209,0.1918,0.9589,2.8767,5.7534,avg tx,Hardhat gas reporter (2026-03-20),Average across ordinary unit-test-sized registration calls.
+Admin,Register voters (large batch cost per voter),register-large-allowlist benchmark,24348,0.0078,0.0717,0.3585,1.0755,2.1509,avg per voter,Scale benchmark (2026-03-20),Effective allowlist cost per voter at large scale.
+Admin,Register voters (large batch of 250),register-large-allowlist benchmark,6087023,1.9537,17.9243,89.6215,268.8644,537.7288,avg tx,Scale benchmark (2026-03-20),Average gas per batch transaction.
+Admin,Update election window,"updateWindow(uint64,uint64)",34613,0.0111,0.1019,0.5096,1.5289,3.0577,avg tx,Hardhat gas reporter (2026-03-20),Pre-start admin operation.
+Admin,Close election early,closeEarly(),33883,0.0109,0.0998,0.4989,1.4966,2.9932,avg tx,Hardhat gas reporter (2026-03-20),Admin emergency close in pending or open state.
+Pending,Link identity (typical mixed suite),"linkIdentity(address,uint256,uint256,bytes)",222518,0.0714,0.6552,3.2762,9.8286,19.6573,avg tx,Hardhat gas reporter (2026-03-20),Typical average across the normal suite.
+Pending,Link identity (real Semaphore scale),"linkIdentity(address,uint256,uint256,bytes)",260932,0.0838,0.7684,3.8418,11.5254,23.0508,avg tx,Scale benchmark (2026-03-20),Uses the real local Semaphore contract and real tree insertion.
+Open,Cast vote (typical mixed suite),"vote(uint256,SemaphoreProof,bytes32)",143157,0.0459,0.4216,2.1078,6.3233,12.6465,avg tx,Hardhat gas reporter (2026-03-20),"Mixed average across tests, including lighter and heavier proof paths."
+Open,Cast vote (mock verifier throughput),"vote(uint256,SemaphoreProof,bytes32)",102414,0.0329,0.3016,1.5079,4.5236,9.0473,avg tx,Scale benchmark (2026-03-20),Good for throughput estimates; not the realistic real-proof cost.
+Open,Cast vote (real proof baseline),"vote(uint256,SemaphoreProof,bytes32)",351520,0.1128,1.0351,5.1756,15.5267,31.0533,single tx baseline,Scale benchmark (2026-03-20),Best single-number baseline for realistic real-proof vote cost.
+Read,View election status and info,status() / electionInfo(),0,0,0,0,0,0,off-chain read,Contract design,Read-only call; no gas cost to the UI caller unless sent as a transaction.
+Read,View candidates and tally,candidates() / tally(),0,0,0,0,0,0,off-chain read,Contract design,Read-only call used by the Election page and Live Tally screen.
+Read,Check receipt inclusion,hasReceipt(bytes32),0,0,0,0,0,0,off-chain read,Contract design,Used by the receipt verification page.
+Read,Prepare link signature,"linkPayloadHash(address,uint256,uint256)",0,0,0,0,0,0,off-chain read,Contract design,Helper used to bind the voter signature to a specific commitment and expiry.
+Read,Prepare vote proof binding,"voteMessage(uint256,bytes32) / voteScope()",0,0,0,0,0,0,off-chain read,Contract design,Helpers used during proof generation and relayer-side verification.

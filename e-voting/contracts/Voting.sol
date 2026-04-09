@@ -7,16 +7,25 @@ import "@semaphore-protocol/contracts/interfaces/ISemaphore.sol";
 import "@semaphore-protocol/contracts/interfaces/ISemaphoreGroups.sol";
 
 /// @title Simple Voting MVP with Semaphore zero-knowledge ballots
+/// @notice Admin registers wallet addresses, voters link a private Semaphore
+/// identity before the election opens, and the relayer later submits anonymous
+/// votes backed by a zero-knowledge membership proof.
 contract Voting {
     using MessageHashUtils for bytes32;
 
+    // Basic election roles and external protocol contracts.
     address public admin;
     address public relayer;
     ISemaphore public immutable semaphore;
     ISemaphoreGroups private immutable _semaphoreGroups;
+
+    // Each election gets its own Semaphore group and proof scope.
+    // The group contains identity commitments linked during PENDING.
+    // The scope binds "one vote" to this specific election.
     uint256 public immutable semaphoreGroupId;
     uint256 public immutable voteScope;
 
+    // Human-readable election configuration.
     string public title;
     string[] private _candidates;
     uint64 public startTs;
@@ -25,15 +34,22 @@ contract Voting {
     // candidate index => count
     uint256[] private _tally;
 
-    // voter allowlist + one-time identity linking
+    // registered[voter] means the wallet is eligible for this election.
+    // This is separate from Semaphore membership.
     mapping(address => bool) public registered;
+
+    // Each wallet may link exactly one identity commitment for this election.
     mapping(address => bool) public hasLinkedIdentity;
     mapping(address => uint256) public linkedIdentityCommitment;
+
+    // Prevent reusing the same commitment for multiple wallets or elections.
     mapping(uint256 => bool) public commitmentUsed;
 
-    // receipt hash => used?
+    // Receipt hashes are public inclusion handles shown back to the voter.
+    // Reusing a receipt is rejected to prevent replay.
     mapping(bytes32 => bool) private _receiptUsed;
 
+    // Off-chain link authorization signed by the voter wallet.
     bytes32 private constant _LINK_TYPEHASH =
         keccak256(
             "EVoteLink(address voter,uint256 identityCommitment,uint256 expiry,uint256 chainId,address voting)"
@@ -76,11 +92,17 @@ contract Voting {
         require(relayer_ != address(0), "bad relayer");
         require(semaphore_ != address(0), "bad semaphore");
 
+        // The deployer becomes the admin for this election instance.
         admin = msg.sender;
         relayer = relayer_;
         semaphore = ISemaphore(semaphore_);
         _semaphoreGroups = ISemaphoreGroups(semaphore_);
+
+        // Create a fresh Semaphore group for this election only.
         semaphoreGroupId = semaphore.createGroup(address(this));
+
+        // Proofs are scoped per election so the same identity cannot reuse a
+        // valid nullifier across this contract instance.
         voteScope = uint256(
             keccak256(
                 abi.encodePacked("EVOTE_SCOPE", block.chainid, address(this))
@@ -103,6 +125,9 @@ contract Voting {
         for (uint256 i = 0; i < addrs.length; i++) {
             address voter = addrs[i];
             require(voter != address(0), "bad voter");
+
+            // Registration only allowlists the wallet.
+            // It does not add anything to the Semaphore group yet.
             registered[voter] = true;
             emit VoterRegistered(voter);
         }
@@ -133,6 +158,8 @@ contract Voting {
         uint256 identityCommitment,
         uint256 expiry
     ) public view returns (bytes32) {
+        // The voter signs this exact payload off-chain. Including chainId and
+        // contract address prevents replay on a different network or election.
         return
             keccak256(
                 abi.encode(
@@ -152,6 +179,7 @@ contract Voting {
         uint256 expiry,
         bytes calldata signature
     ) external onlyRelayer {
+        // Linking is a one-time bootstrap step and must happen before voting.
         require(block.timestamp < startTs, "linking closed");
         require(block.timestamp <= expiry, "link expired");
         require(registered[voter], "not registered");
@@ -159,15 +187,18 @@ contract Voting {
         require(identityCommitment != 0, "bad commitment");
         require(!commitmentUsed[identityCommitment], "commitment used");
 
+        // Recover the wallet that signed the link authorization.
         bytes32 digest = linkPayloadHash(voter, identityCommitment, expiry)
             .toEthSignedMessageHash();
         address signer = ECDSA.recover(digest, signature);
         require(signer == voter, "bad link signature");
 
+        // Persist the wallet -> commitment relationship for this election.
         hasLinkedIdentity[voter] = true;
         linkedIdentityCommitment[voter] = identityCommitment;
         commitmentUsed[identityCommitment] = true;
 
+        // This is the moment the voter actually joins the Semaphore group.
         semaphore.addMember(semaphoreGroupId, identityCommitment);
         emit IdentityLinked(identityCommitment);
     }
@@ -178,6 +209,8 @@ contract Voting {
         uint256 optionIndex,
         bytes32 receipt
     ) public pure returns (uint256) {
+        // The proof must be tied to the exact candidate choice and receipt that
+        // are later submitted on-chain.
         return uint256(keccak256(abi.encodePacked(optionIndex, receipt)));
     }
 
@@ -186,6 +219,7 @@ contract Voting {
         ISemaphore.SemaphoreProof calldata proof,
         bytes32 receipt
     ) external onlyRelayer inWindow {
+        // Cheap local checks first before running the heavier zk verifier path.
         require(optionIndex < _tally.length, "bad option");
         require(!_receiptUsed[receipt], "receipt used");
         require(
@@ -194,7 +228,12 @@ contract Voting {
         );
         require(proof.scope == voteScope, "bad proof scope");
 
+        // Semaphore enforces group membership and one-vote-per-identity using
+        // the proof, merkle root, and nullifier.
         semaphore.validateProof(semaphoreGroupId, proof);
+
+        // Once the proof is accepted, the receipt becomes a public inclusion
+        // handle and the tally is updated for the chosen option.
         _receiptUsed[receipt] = true;
 
         _tally[optionIndex] += 1;
@@ -221,6 +260,7 @@ contract Voting {
     }
 
     function groupRoot() external view returns (uint256) {
+        // Exposed mainly for debugging, UI inspection, and tests.
         return _semaphoreGroups.getMerkleTreeRoot(semaphoreGroupId);
     }
 
@@ -241,6 +281,7 @@ contract Voting {
     }
 
     function status() public view returns (string memory) {
+        // Derived from time only; there is no separate mutable status flag.
         if (block.timestamp < startTs) {
             return "PENDING";
         } else if (block.timestamp >= startTs && block.timestamp <= endTs) {

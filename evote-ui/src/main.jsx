@@ -1,11 +1,12 @@
 // evote-ui/src/main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import "./index.css";
 
 import App from "./App.jsx";
 import AppLayout from "./layout/AppLayout.jsx";
+import { isKioskMode, kioskBallotHref } from "./lib/uiMode";
 
 // Pages
 import AdminPage from "./pages/AdminPage.jsx";
@@ -24,14 +25,28 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Routes>
         <Route element={<AppLayout />}>
           {/* Home */}
-          <Route path="/" element={<App />} />
+          <Route
+            path="/"
+            element={
+              isKioskMode && kioskBallotHref ? <Navigate to={kioskBallotHref} replace /> : <App />
+            }
+          />
 
           {/* Admin */}
-          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="/admin"
+            element={isKioskMode ? <Navigate to="/" replace /> : <AdminPage />}
+          />
 
           {/* Watchdog audit */}
-          <Route path="/watchdog" element={<WatchdogRoute />} />
-          <Route path="/watchdog/:addr" element={<WatchdogRoute />} />
+          <Route
+            path="/watchdog"
+            element={isKioskMode ? <Navigate to="/" replace /> : <WatchdogRoute />}
+          />
+          <Route
+            path="/watchdog/:addr"
+            element={isKioskMode ? <Navigate to="/" replace /> : <WatchdogRoute />}
+          />
 
           {/* Election routes */}
           <Route path="/election/:addr" element={<ElectionPage />} />

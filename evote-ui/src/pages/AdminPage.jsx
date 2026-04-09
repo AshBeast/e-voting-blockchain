@@ -8,6 +8,7 @@ import semaphoreVerifierArtifact from "../SemaphoreVerifier.json";
 import poseidonArtifact from "../PoseidonT3.json";
 import UiIcon from "../components/UiIcon";
 import { addKnownElectionAddress } from "../lib/electionStore";
+import { friendlyUiError } from "../lib/errors";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -234,7 +235,7 @@ function sleep(ms) {
 }
 
 function errMsg(e) {
-  return e?.reason || e?.shortMessage || e?.message || String(e);
+  return friendlyUiError(e);
 }
 
 async function waitForReceiptWithRecovery(tx, provider) {
@@ -672,7 +673,7 @@ export default function AdminPage() {
     } catch (e) {
       console.error(e);
       const pending = getPendingDeploy();
-      const base = e?.reason || e?.shortMessage || e?.message || String(e);
+      const base = friendlyUiError(e);
       const extra = pending?.hash
         ? `\nIf gas was spent, check pending tx:\n${pending.hash}\nDo not redeploy until this tx is confirmed or failed.`
         : "";
@@ -798,7 +799,7 @@ export default function AdminPage() {
       setVoterBlob(merged.join("\n"));
       setCreateVoterImportMsg(`Imported ${imported.length} address(es) from ${file.name}.`);
     } catch (e) {
-      setCreateVoterImportMsg(`Import failed: ${e?.message || String(e)}`);
+      setCreateVoterImportMsg(`Import failed: ${friendlyUiError(e)}`);
     }
   }
 
@@ -814,7 +815,7 @@ export default function AdminPage() {
       setMoreVotersBlob(merged.join("\n"));
       setManageVoterImportMsg(`Imported ${imported.length} address(es) from ${file.name}.`);
     } catch (e) {
-      setManageVoterImportMsg(`Import failed: ${e?.message || String(e)}`);
+      setManageVoterImportMsg(`Import failed: ${friendlyUiError(e)}`);
     }
   }
 
@@ -882,7 +883,7 @@ export default function AdminPage() {
             startOut = Number(info?.[1]) || startOut;
             endOut = Number(info?.[2]) || endOut;
           } catch (e) {
-            loadError = e?.message || String(e);
+            loadError = friendlyUiError(e);
           }
 
           candidates.push({
@@ -1011,7 +1012,7 @@ export default function AdminPage() {
       );
     } catch (e) {
       console.error(e);
-      setMgmtMsg("❌ " + (e?.message || String(e)));
+      setMgmtMsg("❌ " + friendlyUiError(e));
       clearActionMsgs();
       setMgmt({
         contract: null,

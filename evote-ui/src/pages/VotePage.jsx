@@ -9,6 +9,8 @@ import { generateProof } from "@semaphore-protocol/proof";
 import votingArtifact from "../Voting.json";
 import UiIcon from "../components/UiIcon";
 import { addKnownElectionAddress, markVotedLocally } from "../lib/electionStore";
+import { friendlyUiError } from "../lib/errors";
+import { isKioskMode } from "../lib/uiMode";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -18,7 +20,7 @@ const RPC =
 const RELAYER_URL = import.meta.env.VITE_RELAYER_URL || "http://localhost:8787";
 
 function normErr(e) {
-  return e?.reason || e?.shortMessage || e?.message || String(e);
+  return friendlyUiError(e);
 }
 
 export default function VotePage() {
@@ -238,7 +240,27 @@ export default function VotePage() {
   return (
     <div className="page vote-page">
       <div className="vote-head-row">
-        <h1>Cast Ballot</h1>
+        <div className="vote-head-copy">
+          <h1>Cast Ballot</h1>
+          {isKioskMode && (
+            <div className="vote-kiosk-meta">
+              {title ? <div className="vote-kiosk-title">{title}</div> : null}
+              {status ? (
+                <span
+                  className={`home-status home-status-${
+                    status?.toLowerCase() === "open" ||
+                    status?.toLowerCase() === "pending" ||
+                    status?.toLowerCase() === "closed"
+                      ? status.toLowerCase()
+                      : "unknown"
+                  }`}
+                >
+                  {status}
+                </span>
+              ) : null}
+            </div>
+          )}
+        </div>
         <div className="vote-mode-inline">
           <span className="vote-mode-chip">
             {useLocal ? "Local signer" : "MetaMask signer"}
@@ -266,60 +288,77 @@ export default function VotePage() {
           <label className="field">
             <span>Private Key</span>
             <input
-              type="password"
+              type={isKioskMode ? "text" : "password"}
               className="input"
               placeholder="0x…"
               value={pk}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(e) => setPk(e.target.value)}
             />
           </label>
         </section>
       )}
 
-      <section className="card vote-info-card">
-        <div className="kv">
-          <b>Title:</b> {title || "—"}
-        </div>
-        <div className="kv">
-          <b>Contract:</b> <span className="mono">{addr}</span>
-        </div>
-        <div className="kv">
-          <b>Status:</b>{" "}
-          <span
-            className={`home-status home-status-${
-              status?.toLowerCase() === "open" ||
-              status?.toLowerCase() === "pending" ||
-              status?.toLowerCase() === "closed"
-                ? status.toLowerCase()
-                : "unknown"
-            }`}
-          >
-            {status || "UNKNOWN"}
-          </span>
-        </div>
-        <div className="kv">
-          <b>Candidates:</b> {candidates.length ? candidates.length : "—"}
-        </div>
-        <div className="kv">
-          <b>Window:</b> {fmt(startTs)} to {fmt(endTs)}
-        </div>
-        <div className="actions actions-mobile-grid">
-          <Link className="btn link" to={`/election/${addr}`}>
-            <span className="btn-icon"><UiIcon name="back" /></span>
-            Back to Election
-          </Link>
-          <Link className="btn link" to={`/election/${addr}/link`}>
-            <span className="btn-icon"><UiIcon name="link" /></span>
-            Link Identity
-          </Link>
-          <Link className="btn link" to={`/election/${addr}/tally`}>
-            <span className="btn-icon"><UiIcon name="tally" /></span>
-            Live Tally
-          </Link>
-        </div>
-      </section>
+      {!isKioskMode && (
+        <section className="card vote-info-card">
+          <div className="kv">
+            <b>Title:</b> {title || "—"}
+          </div>
+          <div className="kv">
+            <b>Contract:</b> <span className="mono">{addr}</span>
+          </div>
+          <div className="kv">
+            <b>Status:</b>{" "}
+            <span
+              className={`home-status home-status-${
+                status?.toLowerCase() === "open" ||
+                status?.toLowerCase() === "pending" ||
+                status?.toLowerCase() === "closed"
+                  ? status.toLowerCase()
+                  : "unknown"
+              }`}
+            >
+              {status || "UNKNOWN"}
+            </span>
+          </div>
+          <div className="kv">
+            <b>Candidates:</b> {candidates.length ? candidates.length : "—"}
+          </div>
+          <div className="kv">
+            <b>Window:</b> {fmt(startTs)} to {fmt(endTs)}
+          </div>
+          <div className="actions actions-mobile-grid">
+            <Link className="btn link" to={`/election/${addr}`}>
+              <span className="btn-icon"><UiIcon name="back" /></span>
+              Back to Election
+            </Link>
+            <Link className="btn link" to={`/election/${addr}/link`}>
+              <span className="btn-icon"><UiIcon name="link" /></span>
+              Link Identity
+            </Link>
+            <Link className="btn link" to={`/election/${addr}/tally`}>
+              <span className="btn-icon"><UiIcon name="tally" /></span>
+              Live Tally
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section className="card vote-cast-card">
+        {isKioskMode && status === "PENDING" && (
+          <div className="vote-kiosk-assist">
+            <p className="hint">
+              This election is still pending. Complete identity linking before voting opens.
+            </p>
+            <Link className="btn link" to={`/election/${addr}/link`}>
+              <span className="btn-icon"><UiIcon name="link" /></span>
+              Open Link Identity
+            </Link>
+          </div>
+        )}
+
         <label className="field">
           <span>Candidate</span>
           <select
@@ -340,7 +379,13 @@ export default function VotePage() {
             <span className={`btn-icon ${busy ? "is-spinning" : ""}`}>
               <UiIcon name={busy ? "refresh" : "vote"} />
             </span>
-            {busy ? "Working…" : canVote ? "Cast Vote" : "Voting Closed"}
+            {busy
+              ? "Working…"
+              : canVote
+                ? "Cast Vote"
+                : status === "PENDING"
+                  ? "Vote Opens Soon"
+                  : "Voting Closed"}
           </button>
         </div>
 

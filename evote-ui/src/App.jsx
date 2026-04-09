@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { useNavigate } from "react-router-dom";
 import UiIcon from "./components/UiIcon";
+import { friendlyUiError } from "./lib/errors";
+import { isKioskMode } from "./lib/uiMode";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -138,7 +140,7 @@ export default function App() {
             startTs: Number(entry.startTs) || 0,
             endTs: Number(entry.endTs) || 0,
             status: "UNKNOWN",
-            error: e?.message || String(e),
+            error: friendlyUiError(e),
           });
         }
       }
@@ -152,7 +154,7 @@ export default function App() {
       );
     } catch (e) {
       setRows([]);
-      setListErr(e?.message || String(e));
+      setListErr(friendlyUiError(e));
       setScanMsg("");
     } finally {
       setLoading(false);
@@ -197,18 +199,19 @@ export default function App() {
       : "-";
 
   return (
-    <div className="home-shell">
+    <div className={`home-shell ${isKioskMode ? "kiosk-home-shell" : ""}`}>
       <div className="home-container">
         <header className="home-hero">
-          <h1>HE-Voting</h1>
+          <h1>{isKioskMode ? "HE-Voting Kiosk" : "HE-Voting"}</h1>
           <p>
-            Public election listing comes from relayer registry plus live on-chain
-            reads. No wallet connection required.
+            {isKioskMode
+              ? "Open the assigned election, complete identity linking if needed, then cast and verify a ballot from a larger-accessibility interface."
+              : "Public election listing comes from relayer registry plus live on-chain reads. No wallet connection required."}
           </p>
         </header>
 
         <section className="home-card">
-          <h3>Election Registry</h3>
+          <h3>{isKioskMode ? "Kiosk Status" : "Election Registry"}</h3>
           <div className="home-row">
             <button
               onClick={() => void refreshElections(page)}
@@ -219,87 +222,93 @@ export default function App() {
               <span className={`btn-icon ${loading ? "is-spinning" : ""}`}>
                 <UiIcon name="refresh" />
               </span>
-              {loading ? "Loading..." : "Refresh Elections"}
+              {loading ? "Loading..." : isKioskMode ? "Refresh Elections" : "Refresh Elections"}
             </button>
             <span>RPC Chain ID: {chainId || "-"}</span>
-            <span>Relayer: {RELAYER_URL}</span>
-            <span>
-              Total: {totalCount} (showing {PAGE_SIZE} per page)
-            </span>
+            {!isKioskMode && <span>Relayer: {RELAYER_URL}</span>}
+            {!isKioskMode && (
+              <span>
+                Total: {totalCount} (showing {PAGE_SIZE} per page)
+              </span>
+            )}
           </div>
           {scanMsg && <div className="home-note">{scanMsg}</div>}
           {listErr && <div className="home-error">Error: {listErr}</div>}
         </section>
 
         <section className="home-card">
-          <h3>Ongoing Elections On This Page ({ongoing.length})</h3>
+          <h3>{isKioskMode ? `Open Elections (${ongoing.length})` : `Ongoing Elections On This Page (${ongoing.length})`}</h3>
           {ongoing.length === 0 ? (
-            <div className="home-muted">No open elections found.</div>
+            <div className="home-muted">
+              {isKioskMode ? "No open elections found in the current registry page." : "No open elections found."}
+            </div>
           ) : (
             <ElectionTable rows={ongoing} onOpen={openElection} fmt={fmt} />
           )}
         </section>
 
-        <section className="home-card">
-          <h3>
-            All Discovered Elections - Page {page}/{Math.max(1, totalPages)}
-          </h3>
-          {rows.length === 0 ? (
-            <div className="home-muted">No elections discovered yet.</div>
-          ) : (
-            <ElectionTable rows={rows} onOpen={openElection} fmt={fmt} />
-          )}
-          <div className="home-pagination">
-            <button
-              type="button"
-              onClick={() => changePage(page - 1)}
-              className="home-btn"
-              disabled={loading || page <= 1}
-            >
-              <span className="btn-icon"><UiIcon name="prev" /></span>
-              Prev
-            </button>
-            {pageNumbers.map((p) => (
+        {!isKioskMode && (
+          <section className="home-card">
+            <h3>
+              All Discovered Elections - Page {page}/{Math.max(1, totalPages)}
+            </h3>
+            {rows.length === 0 ? (
+              <div className="home-muted">No elections discovered yet.</div>
+            ) : (
+              <ElectionTable rows={rows} onOpen={openElection} fmt={fmt} />
+            )}
+            <div className="home-pagination">
               <button
-                key={p}
                 type="button"
-                onClick={() => changePage(p)}
-                className={p === page ? "home-btn home-btn-active home-page-num" : "home-btn home-page-num"}
-                disabled={loading}
-                aria-current={p === page ? "page" : undefined}
+                onClick={() => changePage(page - 1)}
+                className="home-btn"
+                disabled={loading || page <= 1}
               >
-                {p}
+                <span className="btn-icon"><UiIcon name="prev" /></span>
+                Prev
               </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => changePage(page + 1)}
-              className="home-btn"
-              disabled={loading || page >= totalPages}
-            >
-              <span className="btn-icon"><UiIcon name="next" /></span>
-              Next
-            </button>
-          </div>
-          {totalPages === 1 && (
-            <div className="home-muted" style={{ marginTop: 8 }}>
-              Only one page is available right now.
+              {pageNumbers.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => changePage(p)}
+                  className={p === page ? "home-btn home-btn-active home-page-num" : "home-btn home-page-num"}
+                  disabled={loading}
+                  aria-current={p === page ? "page" : undefined}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => changePage(page + 1)}
+                className="home-btn"
+                disabled={loading || page >= totalPages}
+              >
+                <span className="btn-icon"><UiIcon name="next" /></span>
+                Next
+              </button>
             </div>
-          )}
-        </section>
+            {totalPages === 1 && (
+              <div className="home-muted" style={{ marginTop: 8 }}>
+                Only one page is available right now.
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="home-card">
-          <h3>Manual Open</h3>
+          <h3>{isKioskMode ? "Open Assigned Election" : "Manual Open"}</h3>
           <input
             value={manualAddr}
             onChange={(e) => setManualAddr(e.target.value.trim())}
-            placeholder="0x..."
+            placeholder={isKioskMode ? "Paste the election contract address" : "0x..."}
             className="home-input mono"
           />
           <div className="home-row">
             <button type="button" onClick={goManual} className="home-btn">
               <span className="btn-icon"><UiIcon name="switch" /></span>
-              Open Election
+              {isKioskMode ? "Open Ballot" : "Open Election"}
             </button>
             <button
               type="button"
@@ -313,7 +322,7 @@ export default function App() {
               }}
             >
               <span className="btn-icon"><UiIcon name="search" /></span>
-              Use Last
+              {isKioskMode ? "Use Last Election" : "Use Last"}
             </button>
           </div>
           {openErr && <div className="home-error">Error: {openErr}</div>}

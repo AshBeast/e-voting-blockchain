@@ -5,7 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:kiosk": "VITE_UI_MODE=kiosk vite",
+    "dev:kiosk:local": "VITE_UI_MODE=kiosk vite",
+    "dev:kiosk:sepolia": "VITE_UI_MODE=kiosk vite --mode sepolia",
     "build": "vite build",
+    "build:kiosk": "VITE_UI_MODE=kiosk vite build",
+    "build:kiosk:local": "VITE_UI_MODE=kiosk vite build",
+    "build:kiosk:sepolia": "VITE_UI_MODE=kiosk vite build --mode sepolia",
+    "relayer": "node relayer/server.cjs",
+    "relayer:sepolia": "RELAYER_ENV_FILE=.env.sepolia node relayer/server.cjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { ethers } from "ethers";
 import UiIcon from "../components/UiIcon";
+import { friendlyUiError } from "../lib/errors";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -149,7 +150,7 @@ export default function LiveTallyPage() {
       setLastUpdatedAt(Date.now());
     } catch (e) {
       console.error(e);
-      setLoadErr(e?.message || String(e));
+      setLoadErr(friendlyUiError(e));
     } finally {
       if (forceBusy) setLoading(false);
     }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
 import UiIcon from "../components/UiIcon";
+import { friendlyUiError } from "../lib/errors";
 import "../App.css";
 
 
@@ -18,7 +19,7 @@ const ABI = [
 ];
 
 function errMsg(e) {
-  return e?.reason || e?.shortMessage || e?.message || String(e);
+  return friendlyUiError(e);
 }
 
 export default function ElectionPage() {

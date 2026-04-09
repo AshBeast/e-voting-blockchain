@@ -6,6 +6,7 @@ import { ethers } from "ethers";
 import VotingArtifact from "../Voting.json";
 import UiIcon from "../components/UiIcon";
 import { txLink, addressLink } from "../lib/explorer";
+import { friendlyUiError } from "../lib/errors";
 import "../App.css";
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -149,7 +150,7 @@ export default function WatchDogPage({ provider, chainId, providerError }) {
         // (Don’t force an error; just give a tip)
       }
     } catch (e) {
-      setError(e?.message || String(e));
+      setError(friendlyUiError(e));
     } finally {
       setLoading(false);
     }

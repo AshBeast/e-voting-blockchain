@@ -1,15 +1,43 @@
-require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
+const dotenv = require("dotenv");
+
+const customEnvFile = process.env.RELAYER_ENV_FILE
+  ? path.resolve(process.cwd(), process.env.RELAYER_ENV_FILE)
+  : "";
+
+const envSources = customEnvFile
+  ? [
+      // When a relayer env file is explicitly selected, treat it as the
+      // authoritative runtime config instead of mixing in local-dev relayer files.
+      { path: path.join(process.cwd(), ".env"), override: false },
+      { path: customEnvFile, override: true },
+    ]
+  : [
+      { path: path.join(process.cwd(), ".env"), override: false },
+      { path: path.join(process.cwd(), ".env.local"), override: false },
+      // Prefer relayer-specific env files over the UI root env files.
+      { path: path.join(__dirname, ".env"), override: true },
+      { path: path.join(__dirname, ".env.local"), override: true },
+    ];
+
+for (const source of envSources) {
+  if (source.path && fs.existsSync(source.path)) {
+    dotenv.config({ path: source.path, override: source.override });
+  }
+}
 
 const votingArtifact = require("../src/Voting.json");
 const semaphoreArtifact = require("../src/Semaphore.json");
 
 const RELAYER_PORT = process.env.RELAYER_PORT || 8787;
-const RPC_URL = process.env.RELAYER_RPC_URL || "http://127.0.0.1:8545";
+const RPC_URL =
+  process.env.RELAYER_RPC_URL ||
+  process.env.VITE_RPC_URL ||
+  "http://127.0.0.1:8545";
 const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY;
 const REGISTRY_FILE =
   process.env.RELAYER_ELECTIONS_FILE ||
@@ -19,7 +47,17 @@ const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 10;
 
 if (!RELAYER_PRIVATE_KEY || !RELAYER_PRIVATE_KEY.startsWith("0x")) {
-  throw new Error("Missing RELAYER_PRIVATE_KEY in .env (must start with 0x)");
+  throw new Error(
+    customEnvFile
+      ? `Missing RELAYER_PRIVATE_KEY in ${path.basename(customEnvFile)} (must start with 0x)`
+      : "Missing RELAYER_PRIVATE_KEY in .env (must start with 0x)"
+  );
+}
+
+if (RELAYER_PRIVATE_KEY.includes("PUT_A_REAL")) {
+  throw new Error(
+    "RELAYER_PRIVATE_KEY is still using the placeholder value. Replace it with a real funded key in evote-ui/relayer/.env.local or evote-ui/.env.local."
+  );
 }
 
 const app = express();

@@ -1,0 +1,14 @@
+Type,Item,Value,Units,Source,Notes
+Current pricing assumption,ETH/CAD snapshot,2944.673,CAD per ETH,Derived from CoinGecko ETH spot and Bank of Canada daily FX,ETH/USD = 2115.73 from CoinGecko on 2026-04-05; USD/CAD = 1.3918 from Bank of Canada daily exchange rates.
+Current pricing assumption,Ethereum mainnet standard gas snapshot,0.109,gwei,Etherscan Gas Tracker,Standard gas at time of estimate on 2026-04-05.
+Planning scenario,Low planning gas,1,gwei,Planner assumption,Included because a single current snapshot can be unusually low.
+Planning scenario,Moderate planning gas,5,gwei,Planner assumption,Useful for more conservative mainnet planning.
+Planning scenario,Busy-network gas,15,gwei,Planner assumption,Useful if network conditions tighten.
+Planning scenario,Stress gas,30,gwei,Planner assumption,Useful for upper-bound budgeting.
+Election scale assumption,Registered electors,28731275,electors,Elections Canada Official Voting Results Table 1,"45th General Election, totals row."
+Election scale assumption,Total ballots cast,19811520,ballots,Elections Canada Official Voting Results Table 3,"45th General Election, totals row."
+Model assumption,Registration cost,24348,gas per elector,Local scale benchmark,Uses large-allowlist benchmark per-voter cost.
+Model assumption,Identity linking cost,260932,gas per voter,Local scale benchmark,Uses real Semaphore scale benchmark.
+Model assumption,Vote cost,351520,gas per ballot,Local real-proof baseline,"Uses real Semaphore proof baseline, not mock throughput."
+Model assumption,Block gas reference,30000000,gas per block,Local benchmark convention,Used only for rough block/day estimates; real mainnet throughput varies.
+Model assumption,Block time reference,12,seconds,Planning assumption,Used only for rough time estimates.

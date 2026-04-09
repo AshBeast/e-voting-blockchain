@@ -173,7 +173,7 @@ Open a new **Terminal C**
 
 1. Create a relayer env file at:
 
-`evote-ui/relayer/.env.local`
+`evote-ui/.env.local`
 example:
 ```bash
 RELAYER_PORT=8787
@@ -182,14 +182,36 @@ RELAYER_PRIVATE_KEY=0x<RELAYER_FUNDED_PRIVATE_KEY>
 ```
 2. Start the relayer:
 ```bash
-cd evote-ui/relayer
-node -r dotenv/config server.cjs dotenv_config_path=.env.local
+cd evote-ui
+pnpm run relayer
 ```
 
 You should see logs like:
 - `Relayer listening on http://localhost:8787`
 - `RPC: ...`
 - `Relayer address: 0x...`
+
+### Kiosk mode
+
+The kiosk UI is frontend-only. It uses the same backend and contracts, but opens a simplified voting interface.
+
+Local Hardhat kiosk:
+
+```bash
+cd evote-ui
+VITE_KIOSK_ELECTION_ADDRESS=0x<YOUR_ELECTION_ADDRESS> pnpm run dev:kiosk:local
+```
+
+Sepolia kiosk:
+
+```bash
+cd evote-ui
+VITE_KIOSK_ELECTION_ADDRESS=0x<YOUR_ELECTION_ADDRESS> pnpm run dev:kiosk:sepolia
+```
+
+If `VITE_KIOSK_ELECTION_ADDRESS` is set, the app opens directly to:
+
+`/election/<address>/vote`
 
 
 

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import WatchDogPage from "../pages/WatchDogPage.jsx";
+import { friendlyUiError } from "../lib/errors";
 
 /**
  * Provider selection rules:
@@ -66,7 +67,7 @@ export default function WatchdogRoute() {
         }
       } catch (e) {
         if (cancelled) return;
-        setProviderError(e?.message || String(e));
+        setProviderError(friendlyUiError(e));
       }
     })();
 

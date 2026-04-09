@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { ethers } from "ethers";
+import { isKioskMode, kioskBallotHref } from "../lib/uiMode";
 import "../App.css";
 
 const THEME_KEY = "home.theme";
@@ -36,6 +37,16 @@ export default function AppLayout() {
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.setAttribute(
+      "data-he-ui-mode",
+      isKioskMode ? "kiosk" : "normal"
+    );
+    return () => {
+      document.documentElement.removeAttribute("data-he-ui-mode");
+    };
+  }, []);
+
+  useEffect(() => {
     setLastContract(localStorage.getItem("last_contract") || "");
   }, [location.pathname]);
 
@@ -56,118 +67,146 @@ export default function AppLayout() {
     return `/election/${ethers.getAddress(lastContract)}`;
   }, [lastContract]);
 
+  const kioskReturnHref = kioskBallotHref || lastElectionHref;
+
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${isKioskMode ? "kiosk-mode" : ""}`}>
       <header className="app-topbar">
-        <div className="app-brand">HE-Voting</div>
-
-        <nav className="app-nav">
-          <NavLink to="/" end className={navClass}>
-            Home
-          </NavLink>
-          <NavLink to="/admin" className={navClass}>
-            Admin
-          </NavLink>
-          <NavLink to="/watchdog" className={navClass}>
-            Watchdog
-          </NavLink>
-          {lastElectionHref && (
-            <NavLink to={lastElectionHref} className={navClass}>
-              Last Election
-            </NavLink>
-          )}
-        </nav>
-
-        <div className="app-controls">
-          <label htmlFor="global-theme">Theme</label>
-          <select
-            id="global-theme"
-            value={theme}
-            className="app-theme-select"
-            onChange={(e) => setTheme(normalizeTheme(e.target.value))}
-          >
-            {THEME_OPTIONS.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+        <div className="app-brand-wrap">
+          <div className="app-brand">HE-Voting</div>
+          {isKioskMode && <div className="app-kiosk-tag">Kiosk Mode</div>}
         </div>
 
-        <button
-          type="button"
-          className={`app-menu-toggle ${mobileMenuOpen ? "is-open" : ""}`}
-          aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={mobileMenuOpen}
-          onClick={() => setMobileMenuOpen((v) => !v)}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-      </header>
+        {!isKioskMode && (
+          <nav className="app-nav">
+            <NavLink to="/" end className={navClass}>
+              Home
+            </NavLink>
+            <NavLink to="/admin" className={navClass}>
+              Admin
+            </NavLink>
+            <NavLink to="/watchdog" className={navClass}>
+              Watchdog
+            </NavLink>
+            {lastElectionHref && (
+              <NavLink to={lastElectionHref} className={navClass}>
+                Last Election
+              </NavLink>
+            )}
+          </nav>
+        )}
 
-      <div
-        className={`app-drawer-overlay ${mobileMenuOpen ? "open" : ""}`}
-        onClick={() => setMobileMenuOpen(false)}
-      />
+        {!isKioskMode ? (
+          <div className="app-controls">
+            <label htmlFor="global-theme">Theme</label>
+            <select
+              id="global-theme"
+              value={theme}
+              className="app-theme-select"
+              onChange={(e) => setTheme(normalizeTheme(e.target.value))}
+            >
+              {THEME_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="app-kiosk-actions">
+            {kioskReturnHref && (
+              <NavLink to={kioskReturnHref} className="app-nav-link">
+                Return to Ballot
+              </NavLink>
+            )}
+            <NavLink to="/" end className="app-nav-link">
+              Start Over
+            </NavLink>
+          </div>
+        )}
 
-      <aside className={`app-drawer ${mobileMenuOpen ? "open" : ""}`}>
-        <div className="app-drawer-head">
-          <div className="app-drawer-title">Menu</div>
+        {!isKioskMode && (
           <button
             type="button"
-            className="app-drawer-close"
-            aria-label="Close menu"
-            onClick={() => setMobileMenuOpen(false)}
+            className={`app-menu-toggle ${mobileMenuOpen ? "is-open" : ""}`}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((v) => !v)}
           >
-            ✕
+            <span />
+            <span />
+            <span />
           </button>
-        </div>
+        )}
+      </header>
 
-        <nav className="app-drawer-nav">
-          <NavLink to="/" end className={navClass} onClick={() => setMobileMenuOpen(false)}>
-            Home
-          </NavLink>
-          <NavLink to="/admin" className={navClass} onClick={() => setMobileMenuOpen(false)}>
-            Admin
-          </NavLink>
-          <NavLink to="/watchdog" className={navClass} onClick={() => setMobileMenuOpen(false)}>
-            Watchdog
-          </NavLink>
-          {lastElectionHref && (
-            <NavLink to={lastElectionHref} className={navClass} onClick={() => setMobileMenuOpen(false)}>
-              Last Election
+      {!isKioskMode && (
+        <div
+          className={`app-drawer-overlay ${mobileMenuOpen ? "open" : ""}`}
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {!isKioskMode && (
+        <aside className={`app-drawer ${mobileMenuOpen ? "open" : ""}`}>
+          <div className="app-drawer-head">
+            <div className="app-drawer-title">Menu</div>
+            <button
+              type="button"
+              className="app-drawer-close"
+              aria-label="Close menu"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
+
+          <nav className="app-drawer-nav">
+            <NavLink to="/" end className={navClass} onClick={() => setMobileMenuOpen(false)}>
+              Home
             </NavLink>
-          )}
-        </nav>
+            <NavLink to="/admin" className={navClass} onClick={() => setMobileMenuOpen(false)}>
+              Admin
+            </NavLink>
+            <NavLink to="/watchdog" className={navClass} onClick={() => setMobileMenuOpen(false)}>
+              Watchdog
+            </NavLink>
+            {lastElectionHref && (
+              <NavLink to={lastElectionHref} className={navClass} onClick={() => setMobileMenuOpen(false)}>
+                Last Election
+              </NavLink>
+            )}
+          </nav>
 
-        <div className="app-drawer-section">
-          <label htmlFor="global-theme-mobile">Theme</label>
-          <select
-            id="global-theme-mobile"
-            value={theme}
-            className="app-theme-select app-drawer-theme-select"
-            onChange={(e) => setTheme(normalizeTheme(e.target.value))}
-          >
-            {THEME_OPTIONS.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </aside>
+          <div className="app-drawer-section">
+            <label htmlFor="global-theme-mobile">Theme</label>
+            <select
+              id="global-theme-mobile"
+              value={theme}
+              className="app-theme-select app-drawer-theme-select"
+              onChange={(e) => setTheme(normalizeTheme(e.target.value))}
+            >
+              {THEME_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </aside>
+      )}
 
       <main className="app-content">
         <Outlet />
       </main>
 
-      <footer className="app-footer">
-        <span className="app-footer-left">Hybrid Electronic Voting (HE-Voting)</span>
-        <span className="app-footer-center" aria-hidden="true" />
-        <span className="app-footer-right">Built by Ashkan Zahedanaraki • {year}</span>
-      </footer>
+      {!isKioskMode && (
+        <footer className="app-footer">
+          <span className="app-footer-left">Hybrid Electronic Voting (HE-Voting)</span>
+          <span className="app-footer-center" aria-hidden="true" />
+          <span className="app-footer-right">Built by Ashkan Zahedanaraki • {year}</span>
+        </footer>
+      )}
     </div>
   );
 }

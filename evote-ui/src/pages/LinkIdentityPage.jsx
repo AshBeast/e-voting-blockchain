@@ -6,6 +6,8 @@ import { Identity } from "@semaphore-protocol/identity";
 import votingArtifact from "../Voting.json";
 import UiIcon from "../components/UiIcon";
 import { addKnownElectionAddress } from "../lib/electionStore";
+import { friendlyUiError } from "../lib/errors";
+import { isKioskMode } from "../lib/uiMode";
 
 const RPC =
   import.meta.env.VITE_RPC_URL ||
@@ -15,7 +17,7 @@ const RPC =
 const RELAYER_URL = import.meta.env.VITE_RELAYER_URL || "http://localhost:8787";
 
 function normErr(e) {
-  return e?.reason || e?.shortMessage || e?.message || String(e);
+  return friendlyUiError(e);
 }
 
 function fmt(tsSec) {
@@ -253,10 +255,13 @@ export default function LinkIdentityPage() {
           <label className="field">
             <span>Private Key</span>
             <input
-              type="password"
+              type={isKioskMode ? "text" : "password"}
               className="input"
               placeholder="0x…"
               value={pk}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(e) => setPk(e.target.value)}
             />
           </label>

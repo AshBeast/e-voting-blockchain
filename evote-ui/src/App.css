@@ -674,6 +674,25 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   margin-right: 8px;
 }
 
+.app-brand-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-kiosk-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--home-accent);
+  color: var(--home-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .app-nav {
   display: flex;
   gap: 8px;
@@ -709,6 +728,13 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   align-items: center;
   gap: 8px;
   color: var(--home-muted);
+  margin-left: auto;
+}
+
+.app-kiosk-actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
   margin-left: auto;
 }
 
@@ -867,6 +893,21 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   width: 100%;
 }
 
+.app-layout.kiosk-mode .app-topbar {
+  position: sticky;
+  padding: 14px 18px;
+}
+
+.app-layout.kiosk-mode .app-nav-link {
+  font-size: 16px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--ui-btn-bg) 84%, transparent);
+}
+
+.app-layout.kiosk-mode .app-content {
+  padding-bottom: 32px;
+}
+
 .app-footer {
   margin-top: auto;
   border-top: 1px solid var(--app-nav-border);
@@ -914,6 +955,14 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   margin: 0 auto;
 }
 
+.kiosk-home-shell {
+  padding: 28px 18px 36px;
+}
+
+.kiosk-home-shell .home-container {
+  max-width: 1180px;
+}
+
 .home-hero {
   margin-bottom: 14px;
 }
@@ -939,9 +988,20 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   backdrop-filter: blur(3px);
 }
 
+.kiosk-home-shell .home-card {
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+
 .home-card h3 {
   margin: 0 0 10px;
   font-size: 1.08rem;
+}
+
+.kiosk-home-shell .home-card h3 {
+  font-size: 1.4rem;
+  margin-bottom: 14px;
 }
 
 .home-row {
@@ -951,6 +1011,11 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   align-items: center;
   color: var(--home-muted);
   font-size: 13px;
+}
+
+.kiosk-home-shell .home-row {
+  font-size: 16px;
+  gap: 12px;
 }
 
 .home-input {
@@ -963,6 +1028,13 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   font: inherit;
   color: var(--home-text);
   background: #ffffffea;
+}
+
+.kiosk-home-shell .home-input {
+  min-height: 60px;
+  padding: 14px 16px;
+  font-size: 1.1rem;
+  border-radius: 12px;
 }
 
 :root[data-he-theme="graphite"] .home-input {
@@ -984,6 +1056,57 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   justify-content: center;
   gap: 6px;
   transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.kiosk-home-shell .home-btn,
+.app-layout.kiosk-mode .btn,
+.app-layout.kiosk-mode .link.btn {
+  min-height: 56px;
+  padding: 12px 18px;
+  font-size: 1.05rem;
+  border-radius: 12px;
+}
+
+.app-layout.kiosk-mode .page {
+  max-width: 1040px;
+  margin: 20px auto;
+  padding: 0 22px;
+}
+
+.app-layout.kiosk-mode .card {
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.app-layout.kiosk-mode .input,
+.app-layout.kiosk-mode textarea.input,
+.app-layout.kiosk-mode select.input,
+.app-layout.kiosk-mode input[type="text"].input,
+.app-layout.kiosk-mode input[type="password"].input,
+.app-layout.kiosk-mode input[type="datetime-local"].input {
+  min-height: 54px;
+  padding: 12px 14px;
+  font-size: 1.02rem;
+  border-radius: 10px;
+}
+
+.app-layout.kiosk-mode h1 {
+  font-size: clamp(2.1rem, 5vw, 3rem);
+}
+
+.app-layout.kiosk-mode h2 {
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+}
+
+.app-layout.kiosk-mode .hint,
+.app-layout.kiosk-mode .kv {
+  font-size: 1rem;
+}
+
+.app-layout.kiosk-mode .actions-mobile-grid > .btn,
+.app-layout.kiosk-mode .actions-mobile-grid > .link.btn,
+.app-layout.kiosk-mode .election-actions .election-action-btn {
+  min-height: 56px;
 }
 
 :root[data-he-theme="graphite"] .home-btn {
@@ -1414,6 +1537,23 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   margin: 0;
 }
 
+.vote-head-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.vote-kiosk-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vote-kiosk-title {
+  color: var(--ui-muted);
+  font-size: 0.96rem;
+}
+
 .vote-mode-inline {
   display: inline-flex;
   align-items: center;
@@ -1441,6 +1581,12 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
   padding: 10px;
   min-height: 58px;
   background: color-mix(in srgb, var(--ui-input-bg) 86%, transparent);
+}
+
+.vote-kiosk-assist {
+  margin-bottom: 14px;
+  display: grid;
+  gap: 10px;
 }
 
 .link-page {
@@ -1486,6 +1632,10 @@ input[type="datetime-local"].input::-webkit-calendar-picker-indicator {
     width: 100%;
     justify-content: flex-start;
   }
+}
+
+.app-layout.kiosk-mode .vote-head-row {
+  align-items: flex-start;
 }
 
 /* ---------- Live Tally TV ---------- */
