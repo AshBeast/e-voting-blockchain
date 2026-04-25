@@ -82,6 +82,13 @@ function parsePositiveInt(value, fallback) {
   return Math.floor(n);
 }
 
+function parseConfiguredChainId() {
+  const raw = process.env.RELAYER_CHAIN_ID || process.env.VITE_CHAIN_ID;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.floor(n);
+}
+
 function trimRegistryInPlace(registry) {
   if (!registry || !Array.isArray(registry.elections)) return false;
   if (registry.elections.length <= REGISTRY_MAX_ELECTIONS) return false;
@@ -286,12 +293,18 @@ app.get("/elections", async (req, res) => {
     const requestedChainId = req.query?.chainId;
     const requestedPage = req.query?.page;
     const requestedPageSize = req.query?.pageSize;
-    const net = await provider.getNetwork();
-    const currentChainId = Number(net.chainId);
-    const chainIdFilter =
-      requestedChainId == null || requestedChainId === ""
-        ? currentChainId
-        : Number(requestedChainId);
+    let chainIdFilter = null;
+
+    if (requestedChainId != null && requestedChainId !== "") {
+      chainIdFilter = Number(requestedChainId);
+    } else {
+      // Prefer configured chain ID to avoid an unnecessary RPC call.
+      chainIdFilter = parseConfiguredChainId();
+      if (chainIdFilter == null) {
+        const net = await provider.getNetwork();
+        chainIdFilter = Number(net.chainId);
+      }
+    }
 
     if (!Number.isFinite(chainIdFilter) || chainIdFilter < 0) {
       throw new Error("Bad chainId query");

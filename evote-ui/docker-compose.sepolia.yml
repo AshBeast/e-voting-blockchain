@@ -1,0 +1,43 @@
+name: evote-sepolia
+
+services:
+  relayer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: relayer-runtime
+    restart: unless-stopped
+    env_file:
+      - ./.env.sepolia.docker
+    environment:
+      RELAYER_PORT: "8787"
+      RELAYER_ELECTIONS_FILE: /app/relayer/data/elections.json
+    volumes:
+      - ./relayer/data:/app/relayer/data
+    expose:
+      - "8787"
+    ports:
+      - "${RELAYER_HOST_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ui-runtime
+      args:
+        VITE_RPC_URL: ${VITE_RPC_URL}
+        VITE_CHAIN_ID: ${VITE_CHAIN_ID:-11155111}
+        VITE_CONTRACT_ADDRESS: ${VITE_CONTRACT_ADDRESS:-}
+        VITE_RELAYER_URL: /api
+    restart: unless-stopped
+    depends_on:
+      relayer:
+        condition: service_healthy
+    ports:
+      - "${UI_PORT:-8080}:80"

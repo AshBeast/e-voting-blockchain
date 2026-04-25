@@ -20,11 +20,13 @@ A simple on-chain e-voting MVP built with **Hardhat** (contracts, scripts) and a
 - [Sepolia / MetaMask (Optional)](#sepolia--metamask-optional)
 - [Diagrams](#diagrams)
 - [HardHat Testing](#hardhat-testing)
+- [Gas Report Summary](#gas-report-summary)
 - [Playwright (End-to-End UI Tests)](#playwright-end-to-end-ui-tests)
 - [Milestone 1 — Completed Deliverables](#milestone-1--completed-deliverables)
 - [Milestone 2 — Completed Deliverables](#milestone-2--completed-deliverables)
 - [Milestone 3 — Completed Deliverables](#milestone-3--completed-deliverables)
 - [Milestone 4 — Completed Deliverables](#milestone-4--completed-deliverables)
+- [Milestone 5 — Completed Deliverables](#milestone-5--completed-deliverables)
 - [License](#license)
 
 ---
@@ -606,6 +608,57 @@ npx hardhat test --grep "closeEarly"
 
 ---
 
+## Gas Report Summary
+
+This project includes a detailed gas and CAD cost analysis in:
+
+- [`Gas Report/gas-cost-analysis-cad.md`](Gas%20Report/gas-cost-analysis-cad.md)
+
+The detailed report uses the project’s Hardhat gas reporter output and scale benchmarks together with an April 2026 ETH/CAD market snapshot.
+
+### Key per-process benchmarks
+
+| Process | Gas Used | Approx Cost @ 5 gwei | Approx Cost @ 15 gwei |
+|---|---:|---:|---:|
+| Deploy full Semaphore stack + `Voting.sol` | 15,433,605 | CA$227.23 | CA$681.70 |
+| Deploy `Voting.sol` only | 3,455,447 | CA$50.88 | CA$152.63 |
+| Register one voter | 24,348 | CA$0.36 | CA$1.08 |
+| Link one identity | 260,932 | CA$3.84 | CA$11.53 |
+| Cast one real-proof vote | 351,520 | CA$5.18 | CA$15.53 |
+| Update election window | 34,613 | CA$0.51 | CA$1.53 |
+| Close election early | 33,883 | CA$0.50 | CA$1.50 |
+
+### Main takeaway
+
+For a small prototype, demo, or pilot, the design is workable and the costs are understandable. The main recurring on-chain costs come from:
+
+1. identity linking
+2. proof-based voting
+
+Administrative actions such as deployment, updating the window, and closing the election are comparatively small.
+
+### Federal-scale interpretation
+
+The same report also estimates what this protocol would look like at Canadian federal-election scale using:
+
+- `28,731,275` registered electors
+- `19,811,520` actual ballots cast
+
+Under those assumptions, the estimated total cost is roughly:
+
+- **CA$188.95M @ 5 gwei**
+- **CA$566.84M @ 15 gwei**
+
+The throughput estimate is also a problem:
+
+- total gas: `12,833,169,564,345`
+- about `427,772` blocks at `30M` gas per block
+- about `59.4 days` at `12s` block time
+
+So the current design is suitable for local demos, academic work, and small pilots, but not for a federal-scale deployment on Ethereum mainnet L1. A more realistic production direction would require an L2 or a different chain/governance model.
+
+---
+
 ## Playwright (End-to-End UI Tests)
 
 `UITesting/` covers the local ZK flow end-to-end against your running Hardhat node + relayer.
@@ -740,3 +793,42 @@ The same `Voting.sol` contract and React client now run on Sepolia, with MetaMas
 - **Relayer trust reduction**: relayer can submit txs and pay gas, but cannot silently change candidate choice because proof message is bound to `voteMessage(optionIndex, receipt)`.
 - **Duplicate vote handling**: old model relied on `hasVoted[address]`; new model relies on Semaphore nullifier uniqueness (same identity cannot produce two valid votes for the same scope).
 - **Operational cleanup**: forwarder contract/artifacts/helpers were removed to avoid dead paths and confusion in production/testnet runs.
+
+---
+
+## Milestone 5 — Completed Deliverables
+
+- Date: **April 2026**
+- Goal: Finalize testing, run structured UAT, and prepare the project for the COMP 8900 presentation and final submission.
+
+### What was completed
+
+- **Structured UAT Sessions** — completed 5 user test sessions covering 50 cases in total, with 49 passes and 1 failure caused by lost receipt handling rather than a contract or proof failure.
+- **UAT Findings Logged** — documented key issues in `UAT/UAT-findings-summary.md`, including identity-link clarity, wallet setup difficulty, terminology/readability problems, receipt handling risk, and admin-field confusion between Semaphore and relayer addresses.
+- **Targeted Usability Fixes** — refined UI wording, flow clarity, and presentation cues to reduce confusion around linking, voting, receipt verification, and important admin inputs.
+- **Presentation-Ready Demo Flow** — prepared and validated a full demo sequence:
+  - deploy election
+  - register voters
+  - link identity
+  - cast vote
+  - verify receipt inclusion
+  - observe live tally
+  - close election
+- **Project Cleanup and Documentation** — cleaned up the smart contracts, relayer, frontend, and test assets so the repo reflects the final Semaphore-based architecture rather than older forwarder-only flows.
+- **Submission Packaging** — finalized the milestone artifacts used for the COMP 8900 presentation and final course submission.
+
+### UAT Summary
+
+- **Pass rate:** 98%
+- **Main conclusion:** the core blockchain and zero-knowledge voting flow is reliable; the remaining issues are primarily usability and clarity for less technical users.
+- **Highest-priority follow-ups:**
+  - simplify identity linking explanations or with possible alternitves of research remove this linking process from the user persepective,
+  - make wallet onboarding easier,
+  - make receipts harder to lose,
+  - improve labeling for admin address fields,
+  - highlight critical instructions more clearly.
+
+### Summary
+
+Milestone 5 focused on turning the working Semaphore-based prototype into a presentation-ready and submission-ready project.  
+By combining structured UAT, targeted UX fixes, repository cleanup, and a polished end-to-end demo flow, this milestone completed the transition from a technically working prototype to a well-documented academic deliverable.
